@@ -15,6 +15,7 @@ defmodule InventoryMachine do
   state_machine do
     initial_states([:pending])
     default_initial_state(:pending)
+    failure_states([:unavailable])
 
     transitions do
       transition(:reserve, from: :pending, to: :reserving)

@@ -143,6 +143,18 @@ defmodule AshStateMachine do
         A list of states that may be used by transitions to/from `:*`. See the docs on wildcards for more.
         """
       ],
+      failure_states: [
+        type: {:list, :atom},
+        default: [],
+        doc: """
+        A list of states that represent failure outcomes.
+
+        Used by parallel region completion - the `require_all` strategy
+        checks this list to detect if a region has failed.
+
+        If not specified, no states are considered failures.
+        """
+      ],
       state_attribute: [
         type: :atom,
         doc: "The attribute to store the state in.",

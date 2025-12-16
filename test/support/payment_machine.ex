@@ -15,6 +15,7 @@ defmodule PaymentMachine do
   state_machine do
     initial_states([:pending])
     default_initial_state(:pending)
+    failure_states([:failed])
 
     transitions do
       transition(:process, from: :pending, to: :processing)

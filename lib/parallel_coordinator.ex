@@ -223,10 +223,8 @@ defmodule AshStateMachine.ParallelCoordinator do
     terminal -- failure
   end
 
-  defp get_failure_terminal_states(_resource) do
-    # Use naming convention to identify failure states
-    # Future: Add DSL for terminal_failure_states configuration
-    [:failed, :error, :cancelled, :unavailable, :rejected, :aborted, :timeout]
+  defp get_failure_terminal_states(resource) do
+    AshStateMachine.Info.state_machine_failure_states!(resource)
   end
 
   defp get_all_terminal_states(resource) do
