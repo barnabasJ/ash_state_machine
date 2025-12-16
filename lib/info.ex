@@ -18,4 +18,35 @@ defmodule AshStateMachine.Info do
   def state_machine_all_states(resource_or_dsl) do
     Spark.Dsl.Extension.get_persisted(resource_or_dsl, :all_state_machine_states, [])
   end
+
+  @doc """
+  Returns the list of parallel regions configured for the state machine.
+  """
+  @spec state_machine_parallel_regions(Ash.Resource.t() | map()) ::
+          list(AshStateMachine.ParallelRegion.t())
+  def state_machine_parallel_regions(resource_or_dsl) do
+    Spark.Dsl.Extension.get_entities(resource_or_dsl, [:state_machine, :parallel_regions])
+  end
+
+  @doc """
+  Returns the parallel regions that should be activated for a given parent state.
+  """
+  @spec state_machine_parallel_regions_for_state(Ash.Resource.t() | map(), atom()) ::
+          list(AshStateMachine.ParallelRegion.t())
+  def state_machine_parallel_regions_for_state(resource_or_dsl, state) do
+    resource_or_dsl
+    |> state_machine_parallel_regions()
+    |> Enum.filter(&(&1.activate_on == state))
+  end
+
+  @doc """
+  Returns all unique states that trigger region activation.
+  """
+  @spec state_machine_region_activation_states(Ash.Resource.t() | map()) :: list(atom())
+  def state_machine_region_activation_states(resource_or_dsl) do
+    resource_or_dsl
+    |> state_machine_parallel_regions()
+    |> Enum.map(& &1.activate_on)
+    |> Enum.uniq()
+  end
 end

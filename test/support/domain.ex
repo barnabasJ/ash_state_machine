@@ -11,5 +11,8 @@ defmodule Domain do
     resource Order
     resource NextStateMachine
     resource Verification
+    resource PaymentMachine
+    resource InventoryMachine
+    resource ParallelOrder
   end
 end

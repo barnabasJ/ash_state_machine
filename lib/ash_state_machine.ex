@@ -70,6 +70,62 @@ defmodule AshStateMachine do
     ]
   }
 
+  @parallel_region %Spark.Dsl.Entity{
+    name: :region,
+    target: AshStateMachine.ParallelRegion,
+    args: [:name, :resource],
+    identifier: {:auto, :unique_integer},
+    schema: [
+      name: [
+        type: :atom,
+        required: true,
+        doc:
+          "The name of the parallel region. Used as the relationship name to the region resource."
+      ],
+      resource: [
+        type: :atom,
+        required: true,
+        doc:
+          "The Ash resource module that implements the region's state machine. Must use AshStateMachine."
+      ],
+      activate_on: [
+        type: :atom,
+        required: true,
+        doc: "The parent state that triggers activation of this region."
+      ],
+      completion_strategy: [
+        type: {:one_of, [:require_all, :allow_partial]},
+        default: :require_all,
+        doc:
+          "Strategy for determining when this region is considered complete. Options: `:require_all` (must succeed), `:allow_partial` (any terminal state)."
+      ]
+    ]
+  }
+
+  @parallel_regions %Spark.Dsl.Section{
+    name: :parallel_regions,
+    describe: """
+    Defines parallel regions that run concurrently within the parent state machine.
+
+    Each region references a separate Ash resource that uses AshStateMachine. When the parent
+    enters a region's activation state, that region is initialized. Different regions can be
+    activated in different parent states and have different completion strategies.
+
+    ## Example
+
+    ```elixir
+    parallel_regions do
+      region :payment, PaymentMachine, activate_on: :processing, completion_strategy: :require_all
+      region :inventory, InventoryMachine, activate_on: :processing, completion_strategy: :allow_partial
+      region :shipping, ShippingMachine, activate_on: :shipping
+    end
+    ```
+    """,
+    entities: [
+      @parallel_region
+    ]
+  }
+
   @state_machine %Spark.Dsl.Section{
     name: :state_machine,
     schema: [
@@ -103,7 +159,8 @@ defmodule AshStateMachine do
       ]
     ],
     sections: [
-      @transitions
+      @transitions,
+      @parallel_regions
     ]
   }
 
@@ -119,11 +176,13 @@ defmodule AshStateMachine do
       AshStateMachine.Transformers.SetDefaultInitialState,
       AshStateMachine.Transformers.FillInTransitionDefaults,
       AshStateMachine.Transformers.AddState,
-      AshStateMachine.Transformers.EnsureStateSelected
+      AshStateMachine.Transformers.EnsureStateSelected,
+      AshStateMachine.Transformers.AddParallelRegionRelationships
     ],
     verifiers: [
       AshStateMachine.Verifiers.VerifyTransitionActions,
-      AshStateMachine.Verifiers.VerifyDefaultInitialState
+      AshStateMachine.Verifiers.VerifyDefaultInitialState,
+      AshStateMachine.Verifiers.VerifyParallelRegions
     ],
     imports: [
       AshStateMachine.BuiltinChanges
@@ -280,4 +339,75 @@ defmodule AshStateMachine do
     |> List.flatten()
     |> Enum.uniq()
   end
+
+  # Parallel Regions Helper Functions
+
+  @doc """
+  Checks if the parallel regions of a parent resource have completed.
+
+  Returns:
+  - `{:ok, :complete}` if all regions meet the completion criteria
+  - `{:ok, :pending}` if still waiting for regions to complete
+  - `{:error, reason}` if the completion strategy has failed
+
+  ## Example
+
+      case AshStateMachine.check_parallel_completion(order, Domain) do
+        {:ok, :complete} -> # Ready to transition parent
+        {:ok, :pending} -> # Still waiting
+        {:error, :partial_failure} -> # Failed with :require_all
+      end
+  """
+  @spec check_parallel_completion(Ash.Resource.record(), Ash.Domain.t() | nil) ::
+          {:ok, :complete | :pending} | {:error, atom()}
+  defdelegate check_parallel_completion(parent, domain \\ nil),
+    to: AshStateMachine.ParallelCoordinator,
+    as: :check_completion
+
+  @doc """
+  Checks if all parallel regions have reached terminal states.
+
+  This is a simpler check than `check_parallel_completion/2` - it only
+  checks whether all regions are done, not whether they succeeded.
+
+  ## Example
+
+      if AshStateMachine.all_regions_terminal?(order) do
+        # All regions have finished (success or failure)
+      end
+  """
+  @spec all_regions_terminal?(Ash.Resource.record(), Ash.Domain.t() | nil) :: boolean()
+  defdelegate all_regions_terminal?(parent, domain \\ nil),
+    to: AshStateMachine.ParallelCoordinator
+
+  @doc """
+  Checks if all parallel regions completed successfully.
+
+  Returns true only if all regions are in their configured success terminal states.
+
+  ## Example
+
+      if AshStateMachine.all_regions_succeeded?(order) do
+        # All regions completed successfully
+      end
+  """
+  @spec all_regions_succeeded?(Ash.Resource.record(), Ash.Domain.t() | nil) :: boolean()
+  defdelegate all_regions_succeeded?(parent, domain \\ nil),
+    to: AshStateMachine.ParallelCoordinator
+
+  @doc """
+  Returns the current state of all parallel regions for a parent.
+
+  Returns a list of `{region_name, region_record}` tuples, where
+  `region_record` may be `nil` if the region hasn't been activated yet.
+
+  ## Example
+
+      regions = AshStateMachine.get_region_states(order)
+      # => [{:payment, %PaymentMachine{state: :completed}}, {:inventory, %InventoryMachine{state: :pending}}]
+  """
+  @spec get_region_states(Ash.Resource.record(), Ash.Domain.t() | nil) ::
+          [{atom(), Ash.Resource.record() | nil}]
+  defdelegate get_region_states(parent, domain \\ nil),
+    to: AshStateMachine.ParallelCoordinator
 end
