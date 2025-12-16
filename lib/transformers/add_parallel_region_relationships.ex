@@ -6,7 +6,7 @@ defmodule AshStateMachine.Transformers.AddParallelRegionRelationships do
   @moduledoc """
   Adds has_one relationships for parallel regions.
 
-  For each region defined in `parallel_regions`, this transformer adds a
+  For each region defined within `parallel_region` groups, this transformer adds a
   `has_one` relationship from the parent resource to the region's resource.
 
   ## Example
@@ -14,8 +14,10 @@ defmodule AshStateMachine.Transformers.AddParallelRegionRelationships do
   Given a state machine with:
 
       parallel_regions do
-        region :payment, PaymentMachine
-        region :inventory, InventoryMachine
+        parallel_region :processing, :completed do
+          region :payment, PaymentMachine
+          region :inventory, InventoryMachine
+        end
       end
 
   This transformer will add:
@@ -40,24 +42,39 @@ defmodule AshStateMachine.Transformers.AddParallelRegionRelationships do
   def after?(_), do: false
 
   def transform(dsl_state) do
-    regions = AshStateMachine.Info.state_machine_parallel_regions(dsl_state)
+    parallel_regions = AshStateMachine.Info.state_machine_parallel_regions(dsl_state)
 
-    if Enum.empty?(regions) do
+    if Enum.empty?(parallel_regions) do
       {:ok, dsl_state}
     else
       module = Transformer.get_persisted(dsl_state, :module)
 
-      # Add relationships for each region
-      Enum.reduce_while(regions, {:ok, dsl_state}, fn region, {:ok, dsl_state} ->
-        case add_region_relationship(dsl_state, region, module) do
-          {:ok, dsl_state} -> {:cont, {:ok, dsl_state}}
-          {:error, error} -> {:halt, {:error, error}}
-        end
+      # Add relationships for each region within each parallel_region group
+      Enum.reduce_while(parallel_regions, {:ok, dsl_state}, fn parallel_region,
+                                                               {:ok, dsl_state} ->
+        add_relationships_for_group(dsl_state, parallel_region, module)
       end)
     end
   end
 
-  defp add_region_relationship(dsl_state, region, _module) do
+  defp add_relationships_for_group(dsl_state, parallel_region, _module) do
+    regions = parallel_region.regions || []
+
+    result =
+      Enum.reduce_while(regions, {:ok, dsl_state}, fn region, {:ok, dsl_state} ->
+        case add_region_relationship(dsl_state, region) do
+          {:ok, dsl_state} -> {:cont, {:ok, dsl_state}}
+          {:error, error} -> {:halt, {:error, error}}
+        end
+      end)
+
+    case result do
+      {:ok, dsl_state} -> {:cont, {:ok, dsl_state}}
+      {:error, error} -> {:halt, {:error, error}}
+    end
+  end
+
+  defp add_region_relationship(dsl_state, region) do
     # Add has_one relationship from parent to region resource
     # The region resource should have a parent_id attribute that references this resource
     Ash.Resource.Builder.add_new_relationship(

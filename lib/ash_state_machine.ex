@@ -70,34 +70,60 @@ defmodule AshStateMachine do
     ]
   }
 
-  @parallel_region %Spark.Dsl.Entity{
+  @region %Spark.Dsl.Entity{
     name: :region,
-    target: AshStateMachine.ParallelRegion,
+    target: AshStateMachine.Region,
     args: [:name, :resource],
     identifier: {:auto, :unique_integer},
     schema: [
       name: [
         type: :atom,
         required: true,
-        doc:
-          "The name of the parallel region. Used as the relationship name to the region resource."
+        doc: "The name used for the relationship to this region's resource."
       ],
       resource: [
         type: :atom,
         required: true,
         doc:
-          "The Ash resource module that implements the region's state machine. Must use AshStateMachine."
-      ],
-      activate_on: [
+          "The Ash resource module implementing the region's state machine. Must use AshStateMachine."
+      ]
+    ]
+  }
+
+  @parallel_region %Spark.Dsl.Entity{
+    name: :parallel_region,
+    target: AshStateMachine.ParallelRegion,
+    args: [:enter_state, :exit_state],
+    identifier: :enter_state,
+    entities: [
+      regions: [@region]
+    ],
+    schema: [
+      enter_state: [
         type: :atom,
         required: true,
-        doc: "The parent state that triggers activation of this region."
+        doc: "The parent state that activates this parallel region."
+      ],
+      exit_state: [
+        type: :atom,
+        required: true,
+        doc: "The valid exit state when the parallel region completes."
       ],
       completion_strategy: [
-        type: {:one_of, [:require_all, :allow_partial]},
-        default: :require_all,
+        type:
+          {:or,
+           [
+             {:in, [:all, :any]},
+             {:tuple, [{:literal, :require_n}, :pos_integer]}
+           ]},
+        default: :all,
         doc:
-          "Strategy for determining when this region is considered complete. Options: `:require_all` (must succeed), `:allow_partial` (any terminal state)."
+          "Strategy: `:all` (all succeed), `:any` (first succeeds), `{:require_n, count}` (N must succeed)."
+      ],
+      on_complete: [
+        type: :atom,
+        required: true,
+        doc: "Callback action invoked when completion strategy is satisfied."
       ]
     ]
   }
@@ -107,19 +133,29 @@ defmodule AshStateMachine do
     describe: """
     Defines parallel regions that run concurrently within the parent state machine.
 
-    Each region references a separate Ash resource that uses AshStateMachine. When the parent
-    enters a region's activation state, that region is initialized. Different regions can be
-    activated in different parent states and have different completion strategies.
+    A parallel region groups multiple state machines (regions) that run concurrently when
+    the parent enters a specific state. When the completion strategy is satisfied, the
+    `on_complete` callback is invoked.
 
     ## Example
 
     ```elixir
     parallel_regions do
-      region :payment, PaymentMachine, activate_on: :processing, completion_strategy: :require_all
-      region :inventory, InventoryMachine, activate_on: :processing, completion_strategy: :allow_partial
-      region :shipping, ShippingMachine, activate_on: :shipping
+      parallel_region :processing, :completed do
+        completion_strategy :all
+        on_complete :handle_regions_complete
+
+        region :payment, PaymentMachine
+        region :inventory, InventoryMachine
+      end
     end
     ```
+
+    ## Completion Strategies
+
+    - `:all` - All regions must reach success terminal states
+    - `:any` - Any region reaching success is enough
+    - `{:require_n, count}` - At least `count` regions must succeed
     """,
     entities: [
       @parallel_region

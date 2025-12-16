@@ -6,8 +6,8 @@ defmodule AshStateMachine.BuiltinChanges.ActivateParallelRegions do
   @moduledoc """
   A change that activates parallel regions when the parent enters a specific state.
 
-  This change creates records for parallel regions whose `activate_on` matches
-  the target state of the transition.
+  This change creates records for regions within the parallel_region group whose
+  `enter_state` matches the target state of the transition.
 
   ## Usage
 
@@ -18,7 +18,15 @@ defmodule AshStateMachine.BuiltinChanges.ActivateParallelRegions do
         change activate_parallel_regions()
       end
 
-  Only regions configured with `activate_on: :processing` will be created.
+  Given a parallel_region configured as:
+
+      parallel_region :processing, :completed do
+        region :payment, PaymentMachine
+        region :inventory, InventoryMachine
+      end
+
+  When transitioning to `:processing`, both `PaymentMachine` and `InventoryMachine`
+  resources will be created with `parent_id` set to the parent's id.
   """
   use Ash.Resource.Change
 
@@ -28,7 +36,7 @@ defmodule AshStateMachine.BuiltinChanges.ActivateParallelRegions do
     target_state = Ash.Changeset.get_attribute(changeset, state_attribute)
 
     regions =
-      AshStateMachine.Info.state_machine_parallel_regions_for_state(
+      AshStateMachine.Info.state_machine_regions_for_state(
         changeset.resource,
         target_state
       )

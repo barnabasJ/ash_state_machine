@@ -14,5 +14,14 @@ defmodule Domain do
     resource PaymentMachine
     resource InventoryMachine
     resource ParallelOrder
+
+    # Loan Application resources
+    resource LoanApplication.Application
+    resource LoanApplication.IdentityCheck
+    resource LoanApplication.IncomeCheck
+    resource LoanApplication.EmploymentCheck
+    resource LoanApplication.CreditCheck
+    resource LoanApplication.RiskAssessment
+    resource LoanApplication.ComplianceCheck
   end
 end

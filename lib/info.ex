@@ -29,24 +29,40 @@ defmodule AshStateMachine.Info do
   end
 
   @doc """
-  Returns the parallel regions that should be activated for a given parent state.
+  Returns the parallel region group for a given enter_state.
+
+  Returns `nil` if no parallel region is configured for that state.
   """
-  @spec state_machine_parallel_regions_for_state(Ash.Resource.t() | map(), atom()) ::
-          list(AshStateMachine.ParallelRegion.t())
-  def state_machine_parallel_regions_for_state(resource_or_dsl, state) do
+  @spec state_machine_parallel_region_for_state(Ash.Resource.t() | map(), atom()) ::
+          AshStateMachine.ParallelRegion.t() | nil
+  def state_machine_parallel_region_for_state(resource_or_dsl, state) do
     resource_or_dsl
     |> state_machine_parallel_regions()
-    |> Enum.filter(&(&1.activate_on == state))
+    |> Enum.find(&(&1.enter_state == state))
   end
 
   @doc """
-  Returns all unique states that trigger region activation.
+  Returns the regions that should be activated for a given parent state.
+
+  This returns the individual region entries from within the matching parallel_region group.
+  """
+  @spec state_machine_regions_for_state(Ash.Resource.t() | map(), atom()) ::
+          list(AshStateMachine.Region.t())
+  def state_machine_regions_for_state(resource_or_dsl, state) do
+    case state_machine_parallel_region_for_state(resource_or_dsl, state) do
+      nil -> []
+      parallel_region -> parallel_region.regions || []
+    end
+  end
+
+  @doc """
+  Returns all unique states that trigger parallel region activation.
   """
   @spec state_machine_region_activation_states(Ash.Resource.t() | map()) :: list(atom())
   def state_machine_region_activation_states(resource_or_dsl) do
     resource_or_dsl
     |> state_machine_parallel_regions()
-    |> Enum.map(& &1.activate_on)
+    |> Enum.map(& &1.enter_state)
     |> Enum.uniq()
   end
 end

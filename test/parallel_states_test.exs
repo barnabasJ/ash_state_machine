@@ -49,10 +49,16 @@ defmodule AshStateMachine.ParallelStatesTest do
 
           transitions do
             transition(:start, from: :pending, to: :active)
+            transition(:handle_complete, from: :active, to: :done)
           end
 
           parallel_regions do
-            region(:test_region, TestRegionMachine, activate_on: :active)
+            parallel_region :active, :done do
+              completion_strategy(:all)
+              on_complete(:handle_complete)
+
+              region(:test_region, TestRegionMachine)
+            end
           end
         end
 
@@ -62,6 +68,12 @@ defmodule AshStateMachine.ParallelStatesTest do
 
           update :start do
             change(transition_state(:active))
+          end
+
+          update :handle_complete do
+            argument(:exit_state, :atom)
+            argument(:region_states, :map)
+            change(transition_state(:done))
           end
         end
 
@@ -111,10 +123,16 @@ defmodule AshStateMachine.ParallelStatesTest do
 
               transitions do
                 transition(:start, from: :pending, to: :active)
+                transition(:handle_complete, from: :active, to: :done)
               end
 
               parallel_regions do
-                region(:invalid, NonStateMachineResource, activate_on: :active)
+                parallel_region :active, :done do
+                  completion_strategy(:all)
+                  on_complete(:handle_complete)
+
+                  region(:invalid, NonStateMachineResource)
+                end
               end
             end
 
@@ -124,6 +142,12 @@ defmodule AshStateMachine.ParallelStatesTest do
 
               update :start do
                 change(transition_state(:active))
+              end
+
+              update :handle_complete do
+                argument(:exit_state, :atom)
+                argument(:region_states, :map)
+                change(transition_state(:done))
               end
             end
 
@@ -182,11 +206,17 @@ defmodule AshStateMachine.ParallelStatesTest do
 
           transitions do
             transition(:start, from: :pending, to: :active)
+            transition(:handle_complete, from: :active, to: :done)
           end
 
           parallel_regions do
-            region(:payment, RelRegionMachine, activate_on: :active)
-            region(:inventory, RelRegionMachine, activate_on: :active)
+            parallel_region :active, :done do
+              completion_strategy(:all)
+              on_complete(:handle_complete)
+
+              region(:payment, RelRegionMachine)
+              region(:inventory, RelRegionMachine)
+            end
           end
         end
 
@@ -196,6 +226,12 @@ defmodule AshStateMachine.ParallelStatesTest do
 
           update :start do
             change(transition_state(:active))
+          end
+
+          update :handle_complete do
+            argument(:exit_state, :atom)
+            argument(:region_states, :map)
+            change(transition_state(:done))
           end
         end
 
@@ -220,7 +256,7 @@ defmodule AshStateMachine.ParallelStatesTest do
   end
 
   describe "Info module" do
-    test "state_machine_parallel_regions/1 returns regions" do
+    test "state_machine_parallel_regions/1 returns parallel region groups" do
       defmodule InfoTestRegionMachine do
         @moduledoc false
         use Ash.Resource,
@@ -263,11 +299,17 @@ defmodule AshStateMachine.ParallelStatesTest do
 
           transitions do
             transition(:start, from: :pending, to: :active)
+            transition(:handle_complete, from: :active, to: :done)
           end
 
           parallel_regions do
-            region(:payment, InfoTestRegionMachine, activate_on: :active)
-            region(:inventory, InfoTestRegionMachine, activate_on: :active)
+            parallel_region :active, :done do
+              completion_strategy(:all)
+              on_complete(:handle_complete)
+
+              region(:payment, InfoTestRegionMachine)
+              region(:inventory, InfoTestRegionMachine)
+            end
           end
         end
 
@@ -278,6 +320,12 @@ defmodule AshStateMachine.ParallelStatesTest do
           update :start do
             change(transition_state(:active))
           end
+
+          update :handle_complete do
+            argument(:exit_state, :atom)
+            argument(:region_states, :map)
+            change(transition_state(:done))
+          end
         end
 
         attributes do
@@ -285,16 +333,24 @@ defmodule AshStateMachine.ParallelStatesTest do
         end
       end
 
-      regions = AshStateMachine.Info.state_machine_parallel_regions(InfoTestParallelResource)
-      assert is_list(regions)
-      assert length(regions) == 2
+      parallel_regions =
+        AshStateMachine.Info.state_machine_parallel_regions(InfoTestParallelResource)
 
-      region_names = Enum.map(regions, & &1.name)
+      assert is_list(parallel_regions)
+      assert length(parallel_regions) == 1
+
+      parallel_region = hd(parallel_regions)
+      assert parallel_region.enter_state == :active
+      assert parallel_region.exit_state == :done
+      assert parallel_region.completion_strategy == :all
+      assert length(parallel_region.regions) == 2
+
+      region_names = Enum.map(parallel_region.regions, & &1.name)
       assert :payment in region_names
       assert :inventory in region_names
     end
 
-    test "region completion_strategy is per-region" do
+    test "completion_strategy is per-group" do
       defmodule StrategyTestRegionMachine do
         @moduledoc false
         use Ash.Resource,
@@ -337,18 +393,17 @@ defmodule AshStateMachine.ParallelStatesTest do
 
           transitions do
             transition(:start, from: :pending, to: :active)
+            transition(:handle_complete, from: :active, to: :done)
           end
 
           parallel_regions do
-            region(:required, StrategyTestRegionMachine,
-              activate_on: :active,
-              completion_strategy: :require_all
-            )
+            parallel_region :active, :done do
+              completion_strategy({:require_n, 1})
+              on_complete(:handle_complete)
 
-            region(:optional, StrategyTestRegionMachine,
-              activate_on: :active,
-              completion_strategy: :allow_partial
-            )
+              region(:required, StrategyTestRegionMachine)
+              region(:optional, StrategyTestRegionMachine)
+            end
           end
         end
 
@@ -359,6 +414,12 @@ defmodule AshStateMachine.ParallelStatesTest do
           update :start do
             change(transition_state(:active))
           end
+
+          update :handle_complete do
+            argument(:exit_state, :atom)
+            argument(:region_states, :map)
+            change(transition_state(:done))
+          end
         end
 
         attributes do
@@ -366,15 +427,14 @@ defmodule AshStateMachine.ParallelStatesTest do
         end
       end
 
-      regions = AshStateMachine.Info.state_machine_parallel_regions(StrategyTestParallelResource)
-      required_region = Enum.find(regions, &(&1.name == :required))
-      optional_region = Enum.find(regions, &(&1.name == :optional))
+      parallel_regions =
+        AshStateMachine.Info.state_machine_parallel_regions(StrategyTestParallelResource)
 
-      assert required_region.completion_strategy == :require_all
-      assert optional_region.completion_strategy == :allow_partial
+      parallel_region = hd(parallel_regions)
+      assert parallel_region.completion_strategy == {:require_n, 1}
     end
 
-    test "state_machine_parallel_regions_for_state/2 filters by activation state" do
+    test "state_machine_regions_for_state/2 returns regions for enter_state" do
       defmodule ActivateTestRegionMachine do
         @moduledoc false
         use Ash.Resource,
@@ -418,12 +478,25 @@ defmodule AshStateMachine.ParallelStatesTest do
           transitions do
             transition(:start, from: :pending, to: :processing)
             transition(:ship, from: :processing, to: :shipping)
+            transition(:handle_processing_complete, from: :processing, to: :done)
+            transition(:handle_shipping_complete, from: :shipping, to: :delivered)
           end
 
           parallel_regions do
-            region(:payment, ActivateTestRegionMachine, activate_on: :processing)
-            region(:inventory, ActivateTestRegionMachine, activate_on: :processing)
-            region(:tracking, ActivateTestRegionMachine, activate_on: :shipping)
+            parallel_region :processing, :done do
+              completion_strategy(:all)
+              on_complete(:handle_processing_complete)
+
+              region(:payment, ActivateTestRegionMachine)
+              region(:inventory, ActivateTestRegionMachine)
+            end
+
+            parallel_region :shipping, :delivered do
+              completion_strategy(:all)
+              on_complete(:handle_shipping_complete)
+
+              region(:tracking, ActivateTestRegionMachine)
+            end
           end
         end
 
@@ -438,6 +511,18 @@ defmodule AshStateMachine.ParallelStatesTest do
           update :ship do
             change(transition_state(:shipping))
           end
+
+          update :handle_processing_complete do
+            argument(:exit_state, :atom)
+            argument(:region_states, :map)
+            change(transition_state(:done))
+          end
+
+          update :handle_shipping_complete do
+            argument(:exit_state, :atom)
+            argument(:region_states, :map)
+            change(transition_state(:delivered))
+          end
         end
 
         attributes do
@@ -446,19 +531,19 @@ defmodule AshStateMachine.ParallelStatesTest do
       end
 
       processing_regions =
-        AshStateMachine.Info.state_machine_parallel_regions_for_state(
+        AshStateMachine.Info.state_machine_regions_for_state(
           ActivateTestParallelResource,
           :processing
         )
 
       shipping_regions =
-        AshStateMachine.Info.state_machine_parallel_regions_for_state(
+        AshStateMachine.Info.state_machine_regions_for_state(
           ActivateTestParallelResource,
           :shipping
         )
 
       pending_regions =
-        AshStateMachine.Info.state_machine_parallel_regions_for_state(
+        AshStateMachine.Info.state_machine_regions_for_state(
           ActivateTestParallelResource,
           :pending
         )
@@ -470,6 +555,102 @@ defmodule AshStateMachine.ParallelStatesTest do
       assert hd(shipping_regions).name == :tracking
 
       assert length(pending_regions) == 0
+    end
+
+    test "state_machine_parallel_region_for_state/2 returns the parallel region group" do
+      defmodule GroupTestRegionMachine do
+        @moduledoc false
+        use Ash.Resource,
+          domain: nil,
+          extensions: [AshStateMachine]
+
+        state_machine do
+          initial_states([:pending])
+          default_initial_state(:pending)
+
+          transitions do
+            transition(:complete, from: :pending, to: :complete)
+          end
+        end
+
+        actions do
+          default_accept(:*)
+          defaults([:read, :create])
+
+          update :complete do
+            change(transition_state(:complete))
+          end
+        end
+
+        attributes do
+          uuid_primary_key(:id)
+          attribute :parent_id, :uuid, public?: true
+        end
+      end
+
+      defmodule GroupTestParallelResource do
+        @moduledoc false
+        use Ash.Resource,
+          domain: nil,
+          extensions: [AshStateMachine]
+
+        state_machine do
+          initial_states([:pending])
+          default_initial_state(:pending)
+
+          transitions do
+            transition(:start, from: :pending, to: :active)
+            transition(:handle_complete, from: :active, to: :done)
+          end
+
+          parallel_regions do
+            parallel_region :active, :done do
+              completion_strategy(:any)
+              on_complete(:handle_complete)
+
+              region(:worker_a, GroupTestRegionMachine)
+              region(:worker_b, GroupTestRegionMachine)
+            end
+          end
+        end
+
+        actions do
+          default_accept(:*)
+          defaults([:read, :create])
+
+          update :start do
+            change(transition_state(:active))
+          end
+
+          update :handle_complete do
+            argument(:exit_state, :atom)
+            argument(:region_states, :map)
+            change(transition_state(:done))
+          end
+        end
+
+        attributes do
+          uuid_primary_key(:id)
+        end
+      end
+
+      parallel_region =
+        AshStateMachine.Info.state_machine_parallel_region_for_state(
+          GroupTestParallelResource,
+          :active
+        )
+
+      assert parallel_region != nil
+      assert parallel_region.enter_state == :active
+      assert parallel_region.exit_state == :done
+      assert parallel_region.completion_strategy == :any
+      assert parallel_region.on_complete == :handle_complete
+
+      # No parallel region for :pending state
+      assert AshStateMachine.Info.state_machine_parallel_region_for_state(
+               GroupTestParallelResource,
+               :pending
+             ) == nil
     end
   end
 end

@@ -21,19 +21,18 @@ defmodule ParallelOrder do
     transitions do
       transition(:start_processing, from: :pending, to: :processing)
       transition(:complete, from: :processing, to: :completed)
+      transition(:handle_regions_complete, from: :processing, to: :completed)
       transition(:cancel, from: [:pending, :processing], to: :cancelled)
     end
 
     parallel_regions do
-      region(:payment, PaymentMachine,
-        activate_on: :processing,
-        completion_strategy: :require_all
-      )
+      parallel_region :processing, :completed do
+        completion_strategy(:all)
+        on_complete(:handle_regions_complete)
 
-      region(:inventory, InventoryMachine,
-        activate_on: :processing,
-        completion_strategy: :require_all
-      )
+        region(:payment, PaymentMachine)
+        region(:inventory, InventoryMachine)
+      end
     end
   end
 
@@ -49,6 +48,15 @@ defmodule ParallelOrder do
       require_atomic?(false)
       change(transition_state(:processing))
       change(activate_parallel_regions())
+    end
+
+    update :handle_regions_complete do
+      # Callback action invoked when all regions complete
+      # Arguments exit_state and region_states are passed by the coordinator
+      argument(:exit_state, :atom)
+      argument(:region_states, :map)
+
+      change(transition_state(:completed))
     end
 
     update :complete do

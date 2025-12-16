@@ -4,43 +4,57 @@
 
 defmodule AshStateMachine.ParallelRegion do
   @moduledoc """
-  Represents a parallel region configuration within a state machine.
+  Represents a parallel region group within a state machine.
 
-  Parallel regions allow multiple state machines to run concurrently within
-  a parent state. Each region references a separate Ash resource that uses
-  AshStateMachine, enabling independent state transitions that can be
-  coordinated through completion strategies.
+  A parallel region groups multiple state machines (regions) that run concurrently
+  when the parent enters a specific state. Each region is an Ash resource that uses
+  AshStateMachine.
 
   ## Fields
 
-    * `:name` - The name of the parallel region (atom)
-    * `:resource` - The Ash resource module that implements the region's state machine
-    * `:activate_on` - The parent state that triggers activation of this region
-    * `:completion_strategy` - Strategy for determining completion (`:require_all` or `:allow_partial`)
-    * `:__identifier__` - Internal identifier used by Spark DSL
+    * `:enter_state` - The parent state that activates this parallel region (also the identifier)
+    * `:exit_state` - The valid exit state when region completes (passed to callback)
+    * `:completion_strategy` - Strategy for determining completion (`:all`, `:any`, or `{:require_n, count}`)
+    * `:on_complete` - Callback action invoked when completion strategy is satisfied
+    * `:regions` - List of `AshStateMachine.Region` structs
+
+  ## Completion Strategies
+
+    * `:all` - All regions must reach success terminal states
+    * `:any` - Any region reaching success is enough
+    * `{:require_n, count}` - At least `count` regions must succeed
 
   ## Example
 
       parallel_regions do
-        region :payment, PaymentMachine, activate_on: :processing, completion_strategy: :require_all
-        region :inventory, InventoryMachine, activate_on: :processing, completion_strategy: :allow_partial
+        parallel_region :processing, :completed do
+          completion_strategy :all
+          on_complete :handle_regions_complete
+
+          region :payment, PaymentMachine
+          region :inventory, InventoryMachine
+        end
       end
   """
 
+  @type completion_strategy :: :all | :any | {:require_n, pos_integer()}
+
   @type t :: %__MODULE__{
-          name: atom(),
-          resource: module(),
-          activate_on: atom(),
-          completion_strategy: :require_all | :allow_partial,
+          enter_state: atom(),
+          exit_state: atom(),
+          completion_strategy: completion_strategy(),
+          on_complete: atom(),
+          regions: [AshStateMachine.Region.t()],
           __identifier__: any(),
           __spark_metadata__: Spark.Dsl.Entity.spark_meta()
         }
 
   defstruct [
-    :name,
-    :resource,
-    :activate_on,
+    :enter_state,
+    :exit_state,
     :completion_strategy,
+    :on_complete,
+    :regions,
     :__identifier__,
     :__spark_metadata__
   ]

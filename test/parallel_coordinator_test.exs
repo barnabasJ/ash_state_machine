@@ -6,12 +6,12 @@ defmodule AshStateMachine.ParallelCoordinatorTest do
   use ExUnit.Case
 
   describe "check_completion/2" do
-    test "returns :pending when no regions have been activated" do
+    test "returns :no_active_region when not in a parallel region state" do
       order = ParallelOrder.create!()
 
-      # Before activation, check_completion should return :pending
-      # because regions don't exist yet
-      assert {:ok, :pending} = AshStateMachine.check_parallel_completion(order, Domain)
+      # Before activation, parent is in :pending state which has no parallel_region
+      assert {:error, :no_active_region} =
+               AshStateMachine.check_parallel_completion(order, Domain)
     end
 
     test "returns :pending when regions exist but haven't completed" do
@@ -22,7 +22,7 @@ defmodule AshStateMachine.ParallelCoordinatorTest do
       assert {:ok, :pending} = AshStateMachine.check_parallel_completion(order, Domain)
     end
 
-    test "returns :complete when all regions are in terminal success states" do
+    test "returns :complete with context when all regions are in terminal success states" do
       order = ParallelOrder.create!() |> ParallelOrder.start_processing!()
       order = Ash.load!(order, [:payment, :inventory], domain: Domain)
 
@@ -45,10 +45,17 @@ defmodule AshStateMachine.ParallelCoordinatorTest do
       # Reload order to get fresh data
       order = Ash.get!(ParallelOrder, order.id, domain: Domain)
 
-      assert {:ok, :complete} = AshStateMachine.check_parallel_completion(order, Domain)
+      assert {:ok, :complete, context} =
+               AshStateMachine.check_parallel_completion(order, Domain)
+
+      # Verify context contains expected data
+      assert context.exit_state == :completed
+      assert context.region_states[:payment] == :completed
+      assert context.region_states[:inventory] == :reserved
+      assert context.parallel_region.enter_state == :processing
     end
 
-    test "returns :partial_failure when a region fails with require_all strategy" do
+    test "returns :partial_failure when a region fails with :all strategy" do
       order = ParallelOrder.create!() |> ParallelOrder.start_processing!()
       order = Ash.load!(order, [:payment, :inventory], domain: Domain)
 
@@ -63,11 +70,19 @@ defmodule AshStateMachine.ParallelCoordinatorTest do
       # Reload order to get fresh data
       order = Ash.get!(ParallelOrder, order.id, domain: Domain)
 
-      assert {:error, :partial_failure} = AshStateMachine.check_parallel_completion(order, Domain)
+      assert {:error, :partial_failure} =
+               AshStateMachine.check_parallel_completion(order, Domain)
     end
   end
 
   describe "all_regions_terminal?/2" do
+    test "returns false when not in a parallel region state" do
+      order = ParallelOrder.create!()
+
+      # Not in a parallel region state
+      assert AshStateMachine.all_regions_terminal?(order, Domain) == false
+    end
+
     test "returns false when regions haven't completed" do
       order = ParallelOrder.create!() |> ParallelOrder.start_processing!()
 
@@ -101,6 +116,12 @@ defmodule AshStateMachine.ParallelCoordinatorTest do
   end
 
   describe "all_regions_succeeded?/2" do
+    test "returns false when not in a parallel region state" do
+      order = ParallelOrder.create!()
+
+      assert AshStateMachine.all_regions_succeeded?(order, Domain) == false
+    end
+
     test "returns false when any region has failed" do
       order = ParallelOrder.create!() |> ParallelOrder.start_processing!()
       order = Ash.load!(order, [:payment, :inventory], domain: Domain)
@@ -153,7 +174,7 @@ defmodule AshStateMachine.ParallelCoordinatorTest do
   end
 
   describe "get_region_states/2" do
-    test "returns region name and record pairs" do
+    test "returns region name and record pairs when in parallel region state" do
       order = ParallelOrder.create!() |> ParallelOrder.start_processing!()
 
       states = AshStateMachine.get_region_states(order, Domain)
@@ -167,15 +188,33 @@ defmodule AshStateMachine.ParallelCoordinatorTest do
                Enum.find(states, fn {name, _} -> name == :inventory end)
     end
 
-    test "returns nil for regions not yet created" do
+    test "returns empty list when not in a parallel region state" do
       order = ParallelOrder.create!()
 
-      # Before activation, regions don't exist
+      # Before activation, parent is not in a parallel region state
       states = AshStateMachine.get_region_states(order, Domain)
 
-      assert length(states) == 2
-      assert {:payment, nil} = Enum.find(states, fn {name, _} -> name == :payment end)
-      assert {:inventory, nil} = Enum.find(states, fn {name, _} -> name == :inventory end)
+      assert states == []
+    end
+  end
+
+  describe "find_active_parallel_region/1" do
+    test "returns nil when not in a parallel region state" do
+      order = ParallelOrder.create!()
+
+      assert AshStateMachine.ParallelCoordinator.find_active_parallel_region(order) == nil
+    end
+
+    test "returns the parallel region when in enter_state" do
+      order = ParallelOrder.create!() |> ParallelOrder.start_processing!()
+
+      parallel_region = AshStateMachine.ParallelCoordinator.find_active_parallel_region(order)
+
+      assert parallel_region != nil
+      assert parallel_region.enter_state == :processing
+      assert parallel_region.exit_state == :completed
+      assert parallel_region.completion_strategy == :all
+      assert length(parallel_region.regions) == 2
     end
   end
 end
