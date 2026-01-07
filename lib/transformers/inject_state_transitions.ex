@@ -33,6 +33,9 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
   def before?(_), do: false
 
   def transform(dsl_state) do
+    # First, maybe generate a create action for the default initial state
+    {:ok, dsl_state} = maybe_generate_create_action(dsl_state)
+
     transitions = AshStateMachine.Info.state_machine_transitions(dsl_state)
 
     # Group transitions by action name (excluding wildcards)
@@ -50,6 +53,33 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
         {:error, error} -> {:halt, {:error, error}}
       end
     end)
+  end
+
+  defp maybe_generate_create_action(dsl_state) do
+    existing_create = Ash.Resource.Info.action(dsl_state, :create)
+
+    case AshStateMachine.Info.state_machine_default_initial_state(dsl_state) do
+      # No default initial state configured
+      {:ok, nil} ->
+        {:ok, dsl_state}
+
+      :error ->
+        {:ok, dsl_state}
+
+      # User already defined a create action
+      {:ok, _} when not is_nil(existing_create) ->
+        {:ok, dsl_state}
+
+      # Generate create action
+      {:ok, default_initial_state} ->
+        generate_create_action(dsl_state, default_initial_state)
+    end
+  end
+
+  defp generate_create_action(dsl_state, _initial_state) do
+    # Create actions don't support require_atomic?, so we just generate a simple create action
+    # The RunEntryExitChanges will handle entry callbacks automatically
+    Ash.Resource.Builder.add_action(dsl_state, :create, :create, [])
   end
 
   defp process_action(dsl_state, action_name, transitions) do
@@ -93,9 +123,12 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
         Ash.Resource.Builder.build_action_change(change_spec)
       end)
 
-    # Combine all changes: transition_state + transition-specific changes
+    # Auto-inject ActivateParallelRegions if target is an activation state
+    parallel_region_changes = build_parallel_region_changes(dsl_state, target_state)
+
+    # Combine all changes: transition_state + parallel regions + transition-specific changes
     # Note: Transition validations are handled separately (TODO: implement validation support)
-    all_changes = [transition_change | transition_changes]
+    all_changes = [transition_change] ++ parallel_region_changes ++ transition_changes
 
     # Build action options
     action_opts =
@@ -106,6 +139,22 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
     Ash.Resource.Builder.add_action(dsl_state, :update, action_name, action_opts)
   end
 
+  defp build_parallel_region_changes(dsl_state, target_state) when is_atom(target_state) do
+    activation_states = AshStateMachine.Info.state_machine_region_activation_states(dsl_state)
+
+    if target_state in activation_states do
+      [
+        Ash.Resource.Builder.build_action_change(
+          AshStateMachine.BuiltinChanges.ActivateParallelRegions
+        )
+      ]
+    else
+      []
+    end
+  end
+
+  defp build_parallel_region_changes(_dsl_state, _target_state), do: []
+
   defp merge_transition_configs(transitions) do
     # Merge config from all transitions for this action
     # This handles cases where multiple transitions map to the same action
@@ -115,10 +164,15 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
           accept: Enum.uniq(acc.accept ++ (transition.accept || [])),
           changes: acc.changes ++ (transition.changes || []),
           validations: acc.validations ++ (transition.validations || []),
-          require_atomic?: transition.require_atomic? || acc.require_atomic?
+          # Use first non-nil value (false || nil returns nil, so we need explicit handling)
+          require_atomic?: merge_require_atomic(acc.require_atomic?, transition.require_atomic?)
         }
     end)
   end
+
+  # Merge require_atomic? values - first explicit value wins
+  defp merge_require_atomic(nil, value), do: value
+  defp merge_require_atomic(value, _), do: value
 
   defp maybe_add_accept(opts, []), do: opts
   defp maybe_add_accept(opts, accept), do: Keyword.put(opts, :accept, accept)

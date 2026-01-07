@@ -67,34 +67,16 @@ defmodule AshStateMachine.EntryExitCallbacksTest do
       end
 
       transitions do
-        transition(:start, from: :pending, to: :processing)
-        transition(:complete, from: :processing, to: :completed)
-        transition(:cancel, from: [:pending, :processing], to: :cancelled)
+        transition :start, from: :pending, to: :processing, require_atomic?: false
+        transition :complete, from: :processing, to: :completed, require_atomic?: false
+        transition :cancel, from: [:pending, :processing], to: :cancelled, require_atomic?: false
       end
     end
 
     actions do
       default_accept(:*)
       defaults([:read, :destroy])
-
-      create :create do
-        primary?(true)
-      end
-
-      update :start do
-        require_atomic?(false)
-        change(transition_state(:processing))
-      end
-
-      update :complete do
-        require_atomic?(false)
-        change(transition_state(:completed))
-      end
-
-      update :cancel do
-        require_atomic?(false)
-        change(transition_state(:cancelled))
-      end
+      # create and update actions auto-generated!
     end
 
     ets do
@@ -109,7 +91,58 @@ defmodule AshStateMachine.EntryExitCallbacksTest do
     end
   end
 
+  # Test resource with entry callback on the initial state
+  defmodule OrderWithInitialCallback do
+    use Ash.Resource,
+      domain: Domain,
+      data_layer: Ash.DataLayer.Ets,
+      extensions: [AshStateMachine]
+
+    state_machine do
+      initial_states([:pending])
+      default_initial_state(:pending)
+
+      states do
+        state :pending do
+          on_enter([
+            {AshStateMachine.EntryExitCallbacksTest.RecordingChange, field: :created_at}
+          ])
+        end
+      end
+
+      transitions do
+        transition :start, from: :pending, to: :active, require_atomic?: false
+      end
+    end
+
+    actions do
+      default_accept(:*)
+      defaults([:read, :destroy])
+      # create action auto-generated with require_atomic? false!
+    end
+
+    ets do
+      private?(true)
+    end
+
+    attributes do
+      uuid_primary_key(:id)
+      attribute(:created_at, :utc_datetime_usec, public?: true)
+    end
+  end
+
   describe "entry callbacks" do
+    test "runs on_enter changes when entering initial state on create" do
+      {:ok, order} =
+        OrderWithInitialCallback
+        |> Ash.Changeset.for_create(:create, %{})
+        |> Ash.create(domain: Domain)
+
+      assert order.state == :pending
+      # Entry change for initial state should have run
+      assert_received {:change_run, :created_at}
+    end
+
     test "runs on_enter changes when transitioning to a state" do
       {:ok, order} =
         OrderWithCallbacks

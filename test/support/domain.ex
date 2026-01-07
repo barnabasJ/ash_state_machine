@@ -30,5 +30,11 @@ defmodule Domain do
 
     # Entry/exit callback test resources
     resource AshStateMachine.EntryExitCallbacksTest.OrderWithCallbacks
+    resource AshStateMachine.EntryExitCallbacksTest.OrderWithInitialCallback
+
+    # Entry/exit with regions test resources
+    resource AshStateMachine.EntryExitWithRegionsTest.PaymentWithCallbacks
+    resource AshStateMachine.EntryExitWithRegionsTest.InventoryWithCallbacks
+    resource AshStateMachine.EntryExitWithRegionsTest.OrderWithRegionCallbacks
   end
 end
