@@ -23,5 +23,9 @@ defmodule Domain do
     resource LoanApplication.CreditCheck
     resource LoanApplication.RiskAssessment
     resource LoanApplication.ComplianceCheck
+
+    # Auto-transition test resources
+    resource AutoTransitionMachine
+    resource AutoInjectMachine
   end
 end

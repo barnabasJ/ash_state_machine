@@ -223,9 +223,11 @@ defmodule AshStateMachine do
     transformers: [
       AshStateMachine.Transformers.SetDefaultInitialState,
       AshStateMachine.Transformers.FillInTransitionDefaults,
+      AshStateMachine.Transformers.InjectStateTransitions,
       AshStateMachine.Transformers.AddState,
       AshStateMachine.Transformers.EnsureStateSelected,
-      AshStateMachine.Transformers.AddParallelRegionRelationships
+      AshStateMachine.Transformers.AddParallelRegionRelationships,
+      AshStateMachine.Transformers.GenerateRegionActions
     ],
     verifiers: [
       AshStateMachine.Verifiers.VerifyTransitionActions,

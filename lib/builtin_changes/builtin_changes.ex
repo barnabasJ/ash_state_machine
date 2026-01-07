@@ -64,4 +64,28 @@ defmodule AshStateMachine.BuiltinChanges do
   def check_parallel_completion(opts) do
     {AshStateMachine.BuiltinChanges.CheckParallelCompletion, opts}
   end
+
+  @doc """
+  Delegates an action to a parallel region's child resource.
+
+  This change loads the region, calls the specified action on it,
+  then checks if parallel completion criteria are met and invokes
+  the on_complete callback if so.
+
+  ## Example
+
+      update :payment_complete do
+        change delegate_to_region(:payment, :complete)
+      end
+
+  ## Options
+
+  - `:region` - The region name (atom)
+  - `:action` - The action to call on the region
+  - `:domain` - The Ash domain (optional, defaults to resource's domain)
+  """
+  def delegate_to_region(region, action, opts \\ []) do
+    {AshStateMachine.BuiltinChanges.DelegateToRegion,
+     Keyword.merge(opts, region: region, action: action)}
+  end
 end
