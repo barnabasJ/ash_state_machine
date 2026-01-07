@@ -19,16 +19,16 @@ defmodule ParallelOrder do
     default_initial_state(:pending)
 
     transitions do
-      transition(:start_processing, from: :pending, to: :processing)
-      transition(:complete, from: :processing, to: :completed)
-      transition(:handle_regions_complete, from: :processing, to: :completed)
-      transition(:cancel, from: [:pending, :processing], to: :cancelled)
+      transition(:start_processing, from: :pending, to: :processing, require_atomic?: false)
+      # This transition is auto-detected as the on_complete target
+      transition(:complete, from: :processing, to: :completed, require_atomic?: false)
+      transition(:cancel, from: [:pending, :processing], to: :cancelled, require_atomic?: false)
     end
 
     parallel_regions do
       parallel_region :processing, :completed do
         completion_strategy(:all)
-        on_complete(:handle_regions_complete)
+        # on_complete is optional - system auto-detects :complete transition
 
         region(:payment, PaymentMachine)
         region(:inventory, InventoryMachine)
@@ -39,33 +39,7 @@ defmodule ParallelOrder do
   actions do
     default_accept(:*)
     defaults([:read, :destroy])
-
-    create :create do
-      primary?(true)
-    end
-
-    update :start_processing do
-      require_atomic?(false)
-      change(transition_state(:processing))
-      change(activate_parallel_regions())
-    end
-
-    update :handle_regions_complete do
-      # Callback action invoked when all regions complete
-      # Arguments exit_state and region_states are passed by the coordinator
-      argument(:exit_state, :atom)
-      argument(:region_states, :map)
-
-      change(transition_state(:completed))
-    end
-
-    update :complete do
-      change(transition_state(:completed))
-    end
-
-    update :cancel do
-      change(transition_state(:cancelled))
-    end
+    # All actions auto-generated from transitions!
   end
 
   code_interface do

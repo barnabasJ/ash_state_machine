@@ -292,8 +292,14 @@ defmodule AshStateMachine do
       ],
       on_complete: [
         type: :atom,
-        required: true,
-        doc: "Callback action invoked when completion strategy is satisfied."
+        required: false,
+        doc: """
+        Callback action invoked when completion strategy is satisfied.
+
+        If not specified, the system will:
+        1. Look for an existing transition from enter_state to exit_state and use that action
+        2. Otherwise, directly transition to exit_state inline
+        """
       ]
     ]
   }

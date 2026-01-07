@@ -155,20 +155,15 @@ defmodule AshStateMachine.EntryExitWithRegionsTest do
       transitions do
         # ActivateParallelRegions auto-injected for :processing (activation state)
         transition :start_processing, from: :pending, to: :processing, require_atomic?: false
+        # This transition will be auto-detected as the on_complete target
         transition :complete, from: :processing, to: :completed, require_atomic?: false
-
-        transition :handle_regions_complete,
-          from: :processing,
-          to: :completed,
-          require_atomic?: false
-
         transition :cancel, from: [:pending, :processing], to: :cancelled, require_atomic?: false
       end
 
       parallel_regions do
         parallel_region :processing, :completed do
           completion_strategy(:all)
-          on_complete(:handle_regions_complete)
+          # on_complete is optional - system auto-detects :complete transition
 
           region(:payment, AshStateMachine.EntryExitWithRegionsTest.PaymentWithCallbacks)
           region(:inventory, AshStateMachine.EntryExitWithRegionsTest.InventoryWithCallbacks)
@@ -179,16 +174,7 @@ defmodule AshStateMachine.EntryExitWithRegionsTest do
     actions do
       default_accept(:*)
       defaults([:read, :destroy])
-
-      # handle_regions_complete needs arguments, so we define it manually
-      update :handle_regions_complete do
-        require_atomic?(false)
-        argument(:exit_state, :atom)
-        argument(:region_states, :map)
-        # transition_state auto-injected from transition definition
-      end
-
-      # Other actions auto-generated (including :create)!
+      # All actions auto-generated (including :create and :complete)!
     end
 
     ets do

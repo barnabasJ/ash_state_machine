@@ -89,9 +89,7 @@ defmodule AshStateMachine.BuiltinChanges.CheckParallelCompletion do
         # Check completion
         case AshStateMachine.ParallelCoordinator.check_completion(parent, domain) do
           {:ok, :complete, completion_context} ->
-            # Get the on_complete action from the parallel region
-            on_complete = completion_context.parallel_region.on_complete
-            invoke_callback(parent, on_complete, completion_context, domain, context)
+            invoke_on_complete(parent, completion_context, domain, context)
 
           {:error, _reason} when not is_nil(on_failure) ->
             invoke_callback(parent, on_failure, %{}, domain, context)
@@ -103,6 +101,43 @@ defmodule AshStateMachine.BuiltinChanges.CheckParallelCompletion do
       {:error, _} ->
         :ok
     end
+  end
+
+  defp invoke_on_complete(parent, completion_context, domain, context) do
+    parallel_region = completion_context.parallel_region
+    exit_state = parallel_region.exit_state
+    enter_state = parallel_region.enter_state
+
+    cond do
+      # 1. Explicit on_complete action specified
+      parallel_region.on_complete ->
+        invoke_callback(parent, parallel_region.on_complete, completion_context, domain, context)
+
+      # 2. Look for existing transition from enter_state to exit_state
+      transition = find_transition(parent.__struct__, enter_state, exit_state) ->
+        invoke_callback(parent, transition.action, completion_context, domain, context)
+
+      # 3. Do inline transition
+      true ->
+        do_inline_transition(parent, exit_state, domain, context)
+    end
+  end
+
+  defp find_transition(resource, from_state, to_state) do
+    resource
+    |> AshStateMachine.Info.state_machine_transitions()
+    |> Enum.find(fn t ->
+      from_state in List.wrap(t.from) and to_state in List.wrap(t.to) and t.action != :*
+    end)
+  end
+
+  defp do_inline_transition(parent, exit_state, domain, context) do
+    state_attr = AshStateMachine.Info.state_machine_state_attribute!(parent.__struct__)
+
+    parent
+    |> Ash.Changeset.new()
+    |> Ash.Changeset.force_change_attribute(state_attr, exit_state)
+    |> Ash.update(domain: domain, tenant: context.tenant, actor: context.actor)
   end
 
   defp load_parent(parent_resource, parent_id, domain) do

@@ -79,7 +79,7 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
   defp generate_create_action(dsl_state, _initial_state) do
     # Create actions don't support require_atomic?, so we just generate a simple create action
     # The RunEntryExitChanges will handle entry callbacks automatically
-    Ash.Resource.Builder.add_action(dsl_state, :create, :create, [])
+    Ash.Resource.Builder.add_action(dsl_state, :create, :create, primary?: true)
   end
 
   defp process_action(dsl_state, action_name, transitions) do

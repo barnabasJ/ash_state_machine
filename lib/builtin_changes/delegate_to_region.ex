@@ -100,17 +100,63 @@ defmodule AshStateMachine.BuiltinChanges.DelegateToRegion do
 
   defp invoke_on_complete(parent, completion_context, domain) do
     parallel_region = completion_context.parallel_region
-    on_complete_action = parallel_region.on_complete
+    exit_state = parallel_region.exit_state
+    enter_state = parallel_region.enter_state
 
     # Reload parent to get fresh state
     parent = Ash.reload!(parent, domain: domain)
 
-    # Call the on_complete action with completion context as arguments
+    cond do
+      # 1. Explicit on_complete action specified - pass completion context as arguments
+      parallel_region.on_complete ->
+        invoke_action_with_context(
+          parent,
+          parallel_region.on_complete,
+          completion_context,
+          domain
+        )
+
+      # 2. Look for existing transition from enter_state to exit_state - no args needed
+      transition = find_transition(parent.__struct__, enter_state, exit_state) ->
+        invoke_action(parent, transition.action, domain)
+
+      # 3. Do inline transition
+      true ->
+        do_inline_transition(parent, exit_state, domain)
+    end
+  end
+
+  # Used for explicit on_complete - user's action likely expects these arguments
+  defp invoke_action_with_context(parent, action_name, completion_context, domain) do
     parent
-    |> Ash.Changeset.for_update(on_complete_action, %{
+    |> Ash.Changeset.for_update(action_name, %{
       exit_state: completion_context.exit_state,
       region_states: completion_context.region_states
     })
+    |> Ash.update(domain: domain)
+  end
+
+  # Used for auto-detected transitions - no special arguments needed
+  defp invoke_action(parent, action_name, domain) do
+    parent
+    |> Ash.Changeset.for_update(action_name, %{})
+    |> Ash.update(domain: domain)
+  end
+
+  defp find_transition(resource, from_state, to_state) do
+    resource
+    |> AshStateMachine.Info.state_machine_transitions()
+    |> Enum.find(fn t ->
+      from_state in List.wrap(t.from) and to_state in List.wrap(t.to) and t.action != :*
+    end)
+  end
+
+  defp do_inline_transition(parent, exit_state, domain) do
+    state_attr = AshStateMachine.Info.state_machine_state_attribute!(parent.__struct__)
+
+    parent
+    |> Ash.Changeset.new()
+    |> Ash.Changeset.force_change_attribute(state_attr, exit_state)
     |> Ash.update(domain: domain)
   end
 end
