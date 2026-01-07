@@ -65,4 +65,83 @@ defmodule AshStateMachine.Info do
     |> Enum.map(& &1.enter_state)
     |> Enum.uniq()
   end
+
+  # State callback introspection functions
+
+  @doc """
+  Returns all state definitions with their entry/exit callbacks.
+  """
+  @spec state_machine_states(Ash.Resource.t() | map()) :: list(AshStateMachine.State.t())
+  def state_machine_states(resource_or_dsl) do
+    Spark.Dsl.Extension.get_entities(resource_or_dsl, [:state_machine, :states])
+  end
+
+  @doc """
+  Returns the state definition for a specific state name, if defined.
+  """
+  @spec state_machine_state(Ash.Resource.t() | map(), atom()) :: AshStateMachine.State.t() | nil
+  def state_machine_state(resource_or_dsl, state_name) do
+    resource_or_dsl
+    |> state_machine_states()
+    |> Enum.find(&(&1.name == state_name))
+  end
+
+  @doc """
+  Returns entry changes for a specific state.
+  """
+  @spec state_entry_changes(Ash.Resource.t() | map(), atom()) :: list()
+  def state_entry_changes(resource_or_dsl, state_name) do
+    case state_machine_state(resource_or_dsl, state_name) do
+      %{on_enter: changes} -> changes
+      nil -> []
+    end
+  end
+
+  @doc """
+  Returns entry validations for a specific state.
+  """
+  @spec state_entry_validations(Ash.Resource.t() | map(), atom()) :: list()
+  def state_entry_validations(resource_or_dsl, state_name) do
+    case state_machine_state(resource_or_dsl, state_name) do
+      %{on_enter_validate: validations} -> validations
+      nil -> []
+    end
+  end
+
+  @doc """
+  Returns exit changes for a specific state.
+  """
+  @spec state_exit_changes(Ash.Resource.t() | map(), atom()) :: list()
+  def state_exit_changes(resource_or_dsl, state_name) do
+    case state_machine_state(resource_or_dsl, state_name) do
+      %{on_exit: changes} -> changes
+      nil -> []
+    end
+  end
+
+  @doc """
+  Returns exit validations for a specific state.
+  """
+  @spec state_exit_validations(Ash.Resource.t() | map(), atom()) :: list()
+  def state_exit_validations(resource_or_dsl, state_name) do
+    case state_machine_state(resource_or_dsl, state_name) do
+      %{on_exit_validate: validations} -> validations
+      nil -> []
+    end
+  end
+
+  @doc """
+  Checks if any states have entry or exit callbacks defined.
+  """
+  @spec has_state_callbacks?(Ash.Resource.t() | map()) :: boolean()
+  def has_state_callbacks?(resource_or_dsl) do
+    resource_or_dsl
+    |> state_machine_states()
+    |> Enum.any?(fn state ->
+      state.on_enter != [] or
+        state.on_enter_validate != [] or
+        state.on_exit != [] or
+        state.on_exit_validate != []
+    end)
+  end
 end

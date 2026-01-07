@@ -73,7 +73,8 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
   defp generate_action(dsl_state, action_name, transitions) do
     target_state = determine_target_state(transitions)
 
-    change_ref =
+    # Build the transition state change
+    transition_change_ref =
       if target_state do
         {AshStateMachine.BuiltinChanges.TransitionState, target: target_state}
       else
@@ -81,12 +82,49 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
         AshStateMachine.BuiltinChanges.NextState
       end
 
-    # Build the change struct using the builder (returns {:ok, struct})
-    # Pass as-is since handle_nested_builders unwraps {:ok, _} tuples
-    change = Ash.Resource.Builder.build_action_change(change_ref)
+    transition_change = Ash.Resource.Builder.build_action_change(transition_change_ref)
 
-    Ash.Resource.Builder.add_action(dsl_state, :update, action_name, changes: [change])
+    # Merge configuration from all transitions for this action
+    merged_config = merge_transition_configs(transitions)
+
+    # Build transition-specific changes
+    transition_changes =
+      Enum.map(merged_config.changes, fn change_spec ->
+        Ash.Resource.Builder.build_action_change(change_spec)
+      end)
+
+    # Combine all changes: transition_state + transition-specific changes
+    # Note: Transition validations are handled separately (TODO: implement validation support)
+    all_changes = [transition_change | transition_changes]
+
+    # Build action options
+    action_opts =
+      [changes: all_changes]
+      |> maybe_add_accept(merged_config.accept)
+      |> maybe_add_require_atomic(merged_config.require_atomic?)
+
+    Ash.Resource.Builder.add_action(dsl_state, :update, action_name, action_opts)
   end
+
+  defp merge_transition_configs(transitions) do
+    # Merge config from all transitions for this action
+    # This handles cases where multiple transitions map to the same action
+    Enum.reduce(transitions, %{accept: [], changes: [], validations: [], require_atomic?: nil}, fn
+      transition, acc ->
+        %{
+          accept: Enum.uniq(acc.accept ++ (transition.accept || [])),
+          changes: acc.changes ++ (transition.changes || []),
+          validations: acc.validations ++ (transition.validations || []),
+          require_atomic?: transition.require_atomic? || acc.require_atomic?
+        }
+    end)
+  end
+
+  defp maybe_add_accept(opts, []), do: opts
+  defp maybe_add_accept(opts, accept), do: Keyword.put(opts, :accept, accept)
+
+  defp maybe_add_require_atomic(opts, nil), do: opts
+  defp maybe_add_require_atomic(opts, value), do: Keyword.put(opts, :require_atomic?, value)
 
   defp maybe_inject_transition(dsl_state, action, transitions) do
     if has_manual_transition?(action) do

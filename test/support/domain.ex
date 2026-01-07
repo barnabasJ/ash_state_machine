@@ -27,5 +27,8 @@ defmodule Domain do
     # Auto-transition test resources
     resource AutoTransitionMachine
     resource AutoInjectMachine
+
+    # Entry/exit callback test resources
+    resource AshStateMachine.EntryExitCallbacksTest.OrderWithCallbacks
   end
 end

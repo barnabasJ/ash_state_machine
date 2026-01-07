@@ -5,20 +5,50 @@
 defmodule AshStateMachine do
   defmodule Transition do
     @moduledoc """
-    The configuration for an transition.
+    The configuration for a transition.
+
+    Transitions can optionally include action configuration that will be used
+    when auto-generating the corresponding action.
+
+    ## Fields
+
+      * `:action` - The action name (atom)
+      * `:from` - Source state(s)
+      * `:to` - Target state(s)
+      * `:accept` - List of attributes the action should accept
+      * `:changes` - List of changes specific to this transition
+      * `:validations` - List of validations specific to this transition
+      * `:require_atomic?` - Whether the action requires atomic execution
     """
     @type t :: %__MODULE__{
             action: atom,
             from: [atom],
             to: [atom],
+            accept: [atom],
+            changes: list(),
+            validations: list(),
+            require_atomic?: boolean() | nil,
             __identifier__: any,
             __spark_metadata__: Spark.Dsl.Entity.spark_meta()
           }
 
-    defstruct [:action, :from, :to, :__identifier__, :__spark_metadata__]
+    defstruct [
+      :action,
+      :from,
+      :to,
+      accept: [],
+      changes: [],
+      validations: [],
+      require_atomic?: nil,
+      __identifier__: nil,
+      __spark_metadata__: nil
+    ]
   end
 
   require Logger
+
+  # Type for change/validation specs (module or {module, opts})
+  @change_or_validation_type {:list, {:or, [:atom, {:tuple, [:atom, :keyword_list]}]}}
 
   @transition %Spark.Dsl.Entity{
     name: :transition,
@@ -43,6 +73,43 @@ defmodule AshStateMachine do
         required: true,
         doc:
           "The states that this action may move to. If not specified, then any state is accepted. Use `:*` to refer to all states."
+      ],
+      accept: [
+        type: {:list, :atom},
+        default: [],
+        doc: """
+        List of attributes the auto-generated action should accept.
+
+        When an action is auto-generated from this transition, it will accept these attributes.
+        """
+      ],
+      changes: [
+        type: @change_or_validation_type,
+        default: [],
+        doc: """
+        Changes specific to this transition (run in addition to any entry/exit callbacks).
+
+        Supports:
+        - Module: `MyApp.Changes.DoSomething`
+        - Module with opts: `{MyApp.Changes.DoSomething, opt: value}`
+        """
+      ],
+      validations: [
+        type: @change_or_validation_type,
+        default: [],
+        doc: """
+        Validations specific to this transition (run before the transition).
+
+        Supports the same formats as `changes`.
+        """
+      ],
+      require_atomic?: [
+        type: :boolean,
+        doc: """
+        Whether the auto-generated action should require atomic execution.
+
+        If not set, uses Ash's default behavior.
+        """
       ]
     ]
   }
@@ -67,6 +134,109 @@ defmodule AshStateMachine do
     """,
     entities: [
       @transition
+    ]
+  }
+
+  @state %Spark.Dsl.Entity{
+    name: :state,
+    target: AshStateMachine.State,
+    args: [:name],
+    identifier: :name,
+    schema: [
+      name: [
+        type: :atom,
+        required: true,
+        doc: "The name of the state."
+      ],
+      on_enter: [
+        type: @change_or_validation_type,
+        default: [],
+        doc: """
+        Changes to run when entering this state.
+
+        Supports:
+        - Module: `MyApp.Changes.DoSomething`
+        - Module with opts: `{MyApp.Changes.DoSomething, opt: value}`
+
+        Entry changes run for ANY transition into this state.
+        """
+      ],
+      on_enter_validate: [
+        type: @change_or_validation_type,
+        default: [],
+        doc: """
+        Validations to run when entering this state.
+
+        Supports the same formats as `on_enter`.
+        Entry validations run after entry changes and can rollback the transaction.
+        """
+      ],
+      on_exit: [
+        type: @change_or_validation_type,
+        default: [],
+        doc: """
+        Changes to run when exiting this state.
+
+        Supports the same formats as `on_enter`.
+        Exit changes run for ANY transition out of this state.
+        """
+      ],
+      on_exit_validate: [
+        type: @change_or_validation_type,
+        default: [],
+        doc: """
+        Validations to run when exiting this state.
+
+        Supports the same formats as `on_enter`.
+        Exit validations run before exit changes and can block the transition.
+        """
+      ]
+    ]
+  }
+
+  @states %Spark.Dsl.Section{
+    name: :states,
+    describe: """
+    Defines state lifecycle callbacks (entry/exit changes and validations).
+
+    States defined here can have callbacks that run automatically when entering
+    or exiting the state, regardless of which transition triggers the change.
+
+    ## Example
+
+    ```elixir
+    states do
+      state :processing do
+        on_enter [
+          MyApp.Changes.AllocateResources,
+          {MyApp.Changes.RecordTimestamp, field: :started_at}
+        ]
+
+        on_enter_validate [MyApp.Validations.HasCapacity]
+
+        on_exit [MyApp.Changes.ReleaseResources]
+      end
+
+      state :approved do
+        on_enter [
+          MyApp.Changes.NotifyApproval,
+          {MyApp.Changes.SendEmail, template: :approved}
+        ]
+      end
+    end
+    ```
+
+    ## Execution Order
+
+    1. Exit validations (can block transition)
+    2. Exit changes
+    3. Transition changes
+    4. State attribute change
+    5. Entry changes
+    6. Entry validations (can rollback)
+    """,
+    entities: [
+      @state
     ]
   }
 
@@ -207,6 +377,7 @@ defmodule AshStateMachine do
       ]
     ],
     sections: [
+      @states,
       @transitions,
       @parallel_regions
     ]
@@ -227,12 +398,14 @@ defmodule AshStateMachine do
       AshStateMachine.Transformers.AddState,
       AshStateMachine.Transformers.EnsureStateSelected,
       AshStateMachine.Transformers.AddParallelRegionRelationships,
-      AshStateMachine.Transformers.GenerateRegionActions
+      AshStateMachine.Transformers.GenerateRegionActions,
+      AshStateMachine.Transformers.InjectEntryExitChanges
     ],
     verifiers: [
       AshStateMachine.Verifiers.VerifyTransitionActions,
       AshStateMachine.Verifiers.VerifyDefaultInitialState,
-      AshStateMachine.Verifiers.VerifyParallelRegions
+      AshStateMachine.Verifiers.VerifyParallelRegions,
+      AshStateMachine.Verifiers.VerifyStateCallbacks
     ],
     imports: [
       AshStateMachine.BuiltinChanges
