@@ -18,6 +18,7 @@ defmodule AshStateMachine do
       * `:accept` - List of attributes the action should accept
       * `:changes` - List of changes specific to this transition
       * `:validations` - List of validations specific to this transition
+      * `:guard` - Guard conditions for transition selection
       * `:require_atomic?` - Whether the action requires atomic execution
     """
     @type t :: %__MODULE__{
@@ -27,6 +28,7 @@ defmodule AshStateMachine do
             accept: [atom],
             changes: list(),
             validations: list(),
+            guard: list(),
             require_atomic?: boolean() | nil,
             __identifier__: any,
             __spark_metadata__: Spark.Dsl.Entity.spark_meta()
@@ -39,6 +41,7 @@ defmodule AshStateMachine do
       accept: [],
       changes: [],
       validations: [],
+      guard: [],
       require_atomic?: nil,
       __identifier__: nil,
       __spark_metadata__: nil
@@ -109,6 +112,24 @@ defmodule AshStateMachine do
         Whether the auto-generated action should require atomic execution.
 
         If not set, uses Ash's default behavior.
+        """
+      ],
+      guard: [
+        type: @change_or_validation_type,
+        default: [],
+        doc: """
+        Guard conditions that must pass for this transition to be selected.
+
+        When multiple transitions share the same action and from-state, guards
+        disambiguate which transition to use. Transitions are evaluated in order -
+        the first one whose guard passes wins.
+
+        Uses the same validation references as `where` conditions on changes:
+        - `compare(:score, greater_than_or_equal_to: 90)`
+        - `present(:reviewer_id)`
+        - `attribute_equals(:category, :premium)`
+
+        A transition without a guard acts as the default fallback.
         """
       ]
     ]
@@ -411,7 +432,8 @@ defmodule AshStateMachine do
       AshStateMachine.Verifiers.VerifyTransitionActions,
       AshStateMachine.Verifiers.VerifyDefaultInitialState,
       AshStateMachine.Verifiers.VerifyParallelRegions,
-      AshStateMachine.Verifiers.VerifyStateCallbacks
+      AshStateMachine.Verifiers.VerifyStateCallbacks,
+      AshStateMachine.Verifiers.VerifyTransitionGuards
     ],
     imports: [
       AshStateMachine.BuiltinChanges

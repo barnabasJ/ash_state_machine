@@ -7,15 +7,13 @@ defmodule Domain do
   use Ash.Domain
 
   resources do
-    resource ThreeStates
-    resource Order
-    resource NextStateMachine
-    resource Verification
-    resource PaymentMachine
-    resource InventoryMachine
-    resource ParallelOrder
+    # New E2E test resources
+    resource SupportTicket
+    resource Article
+    resource Subscription
+    resource EcommerceOrder
 
-    # Loan Application resources
+    # Loan Application resources (parallel regions)
     resource LoanApplication.Application
     resource LoanApplication.IdentityCheck
     resource LoanApplication.IncomeCheck
@@ -24,17 +22,22 @@ defmodule Domain do
     resource LoanApplication.RiskAssessment
     resource LoanApplication.ComplianceCheck
 
-    # Auto-transition test resources
+    # Legacy resources - kept as insurance during refactoring
+    resource ThreeStates
+    resource Order
+    resource NextStateMachine
+    resource Verification
+    resource PaymentMachine
+    resource InventoryMachine
+    resource ParallelOrder
     resource AutoTransitionMachine
     resource AutoInjectMachine
-
-    # Entry/exit callback test resources
     resource AshStateMachine.EntryExitCallbacksTest.OrderWithCallbacks
     resource AshStateMachine.EntryExitCallbacksTest.OrderWithInitialCallback
-
-    # Entry/exit with regions test resources
     resource AshStateMachine.EntryExitWithRegionsTest.PaymentWithCallbacks
     resource AshStateMachine.EntryExitWithRegionsTest.InventoryWithCallbacks
     resource AshStateMachine.EntryExitWithRegionsTest.OrderWithRegionCallbacks
+    resource AshStateMachine.TransitionGuardsTest.GuardedMachine
+    resource AshStateMachine.TransitionGuardsTest.AllGuardedMachine
   end
 end

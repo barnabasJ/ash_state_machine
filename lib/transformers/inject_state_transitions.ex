@@ -101,15 +101,29 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
   end
 
   defp generate_action(dsl_state, action_name, transitions) do
-    target_state = determine_target_state(transitions)
+    # Check if any transitions have guards
+    has_guards = Enum.any?(transitions, &(not Enum.empty?(&1.guard)))
 
-    # Build the transition state change
-    transition_change_ref =
-      if target_state do
-        {AshStateMachine.BuiltinChanges.TransitionState, target: target_state}
+    {transition_change_ref, target_states} =
+      if has_guards do
+        # Use guarded transition with sorted transitions (guarded first, unguarded last)
+        sorted_transitions = sort_by_guard_priority(transitions)
+        normalized = normalize_transitions_for_runtime(sorted_transitions)
+        # Collect all possible target states for parallel region activation
+        all_targets = transitions |> Enum.flat_map(&List.wrap(&1.to)) |> Enum.uniq()
+        {{AshStateMachine.BuiltinChanges.GuardedTransition, transitions: normalized}, all_targets}
       else
-        # Multiple targets - use next_state which will error if ambiguous
-        AshStateMachine.BuiltinChanges.NextState
+        target_state = determine_target_state(transitions)
+
+        change =
+          if target_state do
+            {AshStateMachine.BuiltinChanges.TransitionState, target: target_state}
+          else
+            # Multiple targets - use next_state which will error if ambiguous
+            AshStateMachine.BuiltinChanges.NextState
+          end
+
+        {change, List.wrap(target_state)}
       end
 
     transition_change = Ash.Resource.Builder.build_action_change(transition_change_ref)
@@ -123,26 +137,36 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
         Ash.Resource.Builder.build_action_change(change_spec)
       end)
 
-    # Auto-inject ActivateParallelRegions if target is an activation state
-    parallel_region_changes = build_parallel_region_changes(dsl_state, target_state)
+    # Auto-inject ActivateParallelRegions if any target is an activation state
+    parallel_region_changes = build_parallel_region_changes(dsl_state, target_states)
 
     # Combine all changes: transition_state + parallel regions + transition-specific changes
     # Note: Transition validations are handled separately (TODO: implement validation support)
     all_changes = [transition_change] ++ parallel_region_changes ++ transition_changes
 
     # Build action options
+    # When using guarded transitions, force require_atomic?: false since we can't
+    # evaluate multiple guard conditions atomically yet
+    require_atomic =
+      if has_guards do
+        false
+      else
+        merged_config.require_atomic?
+      end
+
     action_opts =
       [changes: all_changes]
       |> maybe_add_accept(merged_config.accept)
-      |> maybe_add_require_atomic(merged_config.require_atomic?)
+      |> maybe_add_require_atomic(require_atomic)
 
     Ash.Resource.Builder.add_action(dsl_state, :update, action_name, action_opts)
   end
 
-  defp build_parallel_region_changes(dsl_state, target_state) when is_atom(target_state) do
+  defp build_parallel_region_changes(dsl_state, target_states) when is_list(target_states) do
     activation_states = AshStateMachine.Info.state_machine_region_activation_states(dsl_state)
 
-    if target_state in activation_states do
+    # Check if any of the target states is an activation state
+    if Enum.any?(target_states, &(&1 in activation_states)) do
       [
         Ash.Resource.Builder.build_action_change(
           AshStateMachine.BuiltinChanges.ActivateParallelRegions
@@ -151,6 +175,10 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
     else
       []
     end
+  end
+
+  defp build_parallel_region_changes(dsl_state, target_state) when is_atom(target_state) do
+    build_parallel_region_changes(dsl_state, [target_state])
   end
 
   defp build_parallel_region_changes(_dsl_state, _target_state), do: []
@@ -190,14 +218,24 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
   end
 
   defp inject_transition(dsl_state, action, transitions) do
-    target_state = determine_target_state(transitions)
+    # Check if any transitions have guards
+    has_guards = Enum.any?(transitions, &(not Enum.empty?(&1.guard)))
 
     change =
-      if target_state do
-        {AshStateMachine.BuiltinChanges.TransitionState, target: target_state}
+      if has_guards do
+        # Use guarded transition with sorted transitions
+        sorted_transitions = sort_by_guard_priority(transitions)
+        normalized = normalize_transitions_for_runtime(sorted_transitions)
+        {AshStateMachine.BuiltinChanges.GuardedTransition, transitions: normalized}
       else
-        # Multiple targets - use next_state which will error if ambiguous
-        AshStateMachine.BuiltinChanges.NextState
+        target_state = determine_target_state(transitions)
+
+        if target_state do
+          {AshStateMachine.BuiltinChanges.TransitionState, target: target_state}
+        else
+          # Multiple targets - use next_state which will error if ambiguous
+          AshStateMachine.BuiltinChanges.NextState
+        end
       end
 
     # Build a change struct
@@ -222,7 +260,8 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
 
       change_module in [
         AshStateMachine.BuiltinChanges.TransitionState,
-        AshStateMachine.BuiltinChanges.NextState
+        AshStateMachine.BuiltinChanges.NextState,
+        AshStateMachine.BuiltinChanges.GuardedTransition
       ]
     end)
   end
@@ -243,5 +282,30 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
       # Multiple targets - return nil to signal next_state() should be used
       _ -> nil
     end
+  end
+
+  # Sort transitions so guarded ones come first (in definition order),
+  # with unguarded transitions last (as fallbacks)
+  defp sort_by_guard_priority(transitions) do
+    {guarded, unguarded} = Enum.split_with(transitions, &(not Enum.empty?(&1.guard)))
+    guarded ++ unguarded
+  end
+
+  # Normalize transition structs to a simpler map format for runtime evaluation
+  defp normalize_transitions_for_runtime(transitions) do
+    Enum.map(transitions, fn t ->
+      %{
+        from: List.wrap(t.from),
+        to: List.wrap(t.to),
+        guard: normalize_guards(t.guard)
+      }
+    end)
+  end
+
+  defp normalize_guards(guards) do
+    Enum.map(guards, fn
+      {module, opts} when is_atom(module) and is_list(opts) -> {module, opts}
+      module when is_atom(module) -> {module, []}
+    end)
   end
 end

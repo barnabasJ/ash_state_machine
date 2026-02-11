@@ -63,27 +63,16 @@ defmodule AshStateMachine.BuiltinChanges.RunEntryExitChanges do
     |> run_changes(exit_changes, context)
   end
 
-  # Schedule entry callbacks to run after the action completes
+  # Run entry callbacks on the changeset (before save)
   defp schedule_entry_callbacks(changeset, nil, _resource, _context), do: changeset
 
   defp schedule_entry_callbacks(changeset, new_state, resource, context) do
     entry_changes = AshStateMachine.Info.state_entry_changes(resource, new_state)
     entry_validations = AshStateMachine.Info.state_entry_validations(resource, new_state)
 
-    if entry_changes == [] and entry_validations == [] do
-      changeset
-    else
-      Ash.Changeset.after_action(changeset, fn _changeset, result ->
-        # Run entry changes first, then validations
-        case run_entry_changes(result, entry_changes, context) do
-          {:ok, result} ->
-            run_entry_validations(result, entry_validations, context)
-
-          {:error, error} ->
-            {:error, error}
-        end
-      end)
-    end
+    changeset
+    |> run_changes(entry_changes, context)
+    |> run_validations(entry_validations, context)
   end
 
   # Run changes on the changeset (for exit changes)
@@ -102,45 +91,6 @@ defmodule AshStateMachine.BuiltinChanges.RunEntryExitChanges do
     Enum.reduce(validation_specs, changeset, fn validation_spec, acc ->
       run_single_validation(acc, validation_spec, context)
     end)
-  end
-
-  # Run entry changes after action (on the result record)
-  defp run_entry_changes(result, [], _context), do: {:ok, result}
-
-  defp run_entry_changes(result, change_specs, context) do
-    # For entry changes, we create a temporary changeset, run changes, and extract attributes
-    # This allows changes to modify the record after it's been saved
-    changeset = Ash.Changeset.new(result)
-
-    final_changeset =
-      Enum.reduce(change_specs, changeset, fn change_spec, acc ->
-        run_single_change(acc, change_spec, context)
-      end)
-
-    # If there are errors, return them
-    if final_changeset.errors != [] do
-      {:error, Ash.Error.to_error_class(final_changeset.errors)}
-    else
-      {:ok, result}
-    end
-  end
-
-  # Run entry validations after action (on the result record)
-  defp run_entry_validations(result, [], _context), do: {:ok, result}
-
-  defp run_entry_validations(result, validation_specs, context) do
-    changeset = Ash.Changeset.new(result)
-
-    final_changeset =
-      Enum.reduce(validation_specs, changeset, fn validation_spec, acc ->
-        run_single_validation(acc, validation_spec, context)
-      end)
-
-    if final_changeset.errors != [] do
-      {:error, Ash.Error.to_error_class(final_changeset.errors)}
-    else
-      {:ok, result}
-    end
   end
 
   # Execute a single change specification
