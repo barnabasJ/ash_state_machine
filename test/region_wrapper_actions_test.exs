@@ -8,6 +8,8 @@ defmodule AshStateMachine.RegionWrapperActionsTest do
   describe "GenerateRegionActions transformer" do
     @tag story: "US-GTA-02"
     test "generated no-input wrapper actions expose metadata and delegate changes" do
+      # Given a resource whose static parallel regions delegate to child region update
+      # actions, AshStateMachine has generated wrapper actions such as :payment_process
       actions = Ash.Resource.Info.actions(ParallelOrder)
       action_names = Enum.map(actions, & &1.name)
 
@@ -21,11 +23,16 @@ defmodule AshStateMachine.RegionWrapperActionsTest do
       }
 
       for {action_name, {region, region_action}} <- expected do
+        # When we inspect each generated wrapper action
         assert action_name in action_names
         action = Enum.find(actions, &(&1.name == action_name))
+
+        # Then it is an update action exposing accept == [] (empty input metadata, not nil)
         assert action.type == :update, "Action #{action_name} should be an update action"
         assert action.accept == []
 
+        # And the wrapper action still delegates to the region through DelegateToRegion
+        # with the correct region and child action
         delegate_change =
           Enum.find(action.changes, fn change ->
             case change.change do

@@ -11,6 +11,9 @@ defmodule AshStateMachine.AutoTransitionTest do
   describe "auto-generated actions from transitions" do
     @tag story: "US-GTA-01"
     test "generated no-input transition actions expose metadata and transition state" do
+      # Given transitions that reference actions the resource did not define explicitly
+      # When AshStateMachine generates those update actions from the transitions
+      # Then each generated action exposes `accept: []` input metadata (not nil)
       for action_name <- [:approve, :reject, :archive] do
         action = Ash.Resource.Info.action(AutoTransitionMachine, action_name)
 
@@ -18,9 +21,11 @@ defmodule AshStateMachine.AutoTransitionTest do
         assert action.accept == []
       end
 
+      # When the generated actions run as normal no-input Ash update actions
       record = AutoTransitionMachine.create!()
       assert record.state == :pending
 
+      # Then they still perform the configured state transition
       approved = AutoTransitionMachine.approve!(record)
       assert approved.state == :approved
 
