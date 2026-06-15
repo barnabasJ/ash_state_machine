@@ -7,8 +7,14 @@ defmodule AshStateMachine.ParallelRegion do
   Represents a parallel region group within a state machine.
 
   A parallel region groups multiple state machines (regions) that run concurrently
-  when the parent enters a specific state. Each region is an Ash resource that uses
-  AshStateMachine.
+  when the parent enters a specific state. A region is sourced one of two ways:
+
+    * **static** — `region :payment, PaymentMachine` activates a single child of
+      the given resource (a fixed cardinality of one).
+    * **relationship-sourced (dynamic)** — `region :line_items` names a parent
+      `has_many` relationship whose existing rows are the region's runtime
+      children, so its cardinality is resolved at runtime. The relationship's
+      destination resource is the one that must use AshStateMachine.
 
   ## Fields
 
@@ -16,7 +22,8 @@ defmodule AshStateMachine.ParallelRegion do
     * `:exit_state` - The valid exit state when region completes (passed to callback)
     * `:completion_strategy` - Strategy for determining completion (`:all`, `:any`, or `{:require_n, count}`)
     * `:on_complete` - Callback action invoked when completion strategy is satisfied
-    * `:regions` - List of `AshStateMachine.Region` structs
+    * `:regions` - List of `AshStateMachine.Region` structs, each either static
+      (carrying a `:resource`) or relationship-sourced (carrying a `:relationship`)
 
   ## Completion Strategies
 
@@ -31,8 +38,11 @@ defmodule AshStateMachine.ParallelRegion do
           completion_strategy :all
           on_complete :handle_regions_complete
 
+          # static region: one child of PaymentMachine
           region :payment, PaymentMachine
-          region :inventory, InventoryMachine
+
+          # relationship-sourced region: one child per :line_items row
+          region :line_items
         end
       end
   """
