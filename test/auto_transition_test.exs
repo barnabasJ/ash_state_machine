@@ -9,22 +9,21 @@ defmodule AshStateMachine.AutoTransitionTest do
   use ExUnit.Case
 
   describe "auto-generated actions from transitions" do
-    test "actions are generated for transitions without explicit actions" do
-      # Verify the actions exist
-      assert Ash.Resource.Info.action(AutoTransitionMachine, :approve)
-      assert Ash.Resource.Info.action(AutoTransitionMachine, :reject)
-      assert Ash.Resource.Info.action(AutoTransitionMachine, :archive)
-    end
+    @tag story: "US-GTA-01"
+    test "generated no-input transition actions expose metadata and transition state" do
+      for action_name <- [:approve, :reject, :archive] do
+        action = Ash.Resource.Info.action(AutoTransitionMachine, action_name)
 
-    test "generated actions perform state transitions correctly" do
+        assert action
+        assert action.accept == []
+      end
+
       record = AutoTransitionMachine.create!()
       assert record.state == :pending
 
-      # Approve transition
       approved = AutoTransitionMachine.approve!(record)
       assert approved.state == :approved
 
-      # Archive from approved
       archived = AutoTransitionMachine.archive!(approved)
       assert archived.state == :archived
     end

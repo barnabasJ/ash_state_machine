@@ -30,6 +30,8 @@ defmodule Domain do
     resource PaymentMachine
     resource InventoryMachine
     resource ParallelOrder
+    resource DynamicParallelOrder
+    resource DynamicLineItemMachine
     resource AutoTransitionMachine
     resource AutoInjectMachine
     resource AshStateMachine.EntryExitCallbacksTest.OrderWithCallbacks

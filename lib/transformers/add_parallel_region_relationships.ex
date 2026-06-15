@@ -75,14 +75,44 @@ defmodule AshStateMachine.Transformers.AddParallelRegionRelationships do
   end
 
   defp add_region_relationship(dsl_state, region) do
-    # Add has_one relationship from parent to region resource
-    # The region resource should have a parent_id attribute that references this resource
-    Ash.Resource.Builder.add_new_relationship(
-      dsl_state,
-      :has_one,
-      region.name,
-      region.resource,
-      destination_attribute: :parent_id
-    )
+    if AshStateMachine.Region.dynamic?(region) do
+      validate_dynamic_relationship(dsl_state, region)
+    else
+      # Static regions keep the original singleton has_one semantics.
+      Ash.Resource.Builder.add_new_relationship(
+        dsl_state,
+        :has_one,
+        region.name,
+        region.resource,
+        destination_attribute: :parent_id
+      )
+    end
+  end
+
+  defp validate_dynamic_relationship(dsl_state, region) do
+    relationship_name = AshStateMachine.Region.relationship_name(region)
+
+    case Ash.Resource.Info.relationship(dsl_state, relationship_name) do
+      %{type: :has_many} ->
+        {:ok, dsl_state}
+
+      %{type: type} ->
+        {:error,
+         Spark.Error.DslError.exception(
+           module: Transformer.get_persisted(dsl_state, :module),
+           path: [:state_machine, :parallel_regions, :region, region.name],
+           message:
+             "Dynamic region `:#{region.name}` must reference a has_many relationship, got `#{inspect(type)}`."
+         )}
+
+      nil ->
+        {:error,
+         Spark.Error.DslError.exception(
+           module: Transformer.get_persisted(dsl_state, :module),
+           path: [:state_machine, :parallel_regions, :region, region.name],
+           message:
+             "Dynamic region `:#{region.name}` references missing relationship `:#{relationship_name}`."
+         )}
+    end
   end
 end

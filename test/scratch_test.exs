@@ -5,12 +5,12 @@ defmodule ScratchTest do
   test "test subscription suspend with map" do
     {:ok, sub} = Subscription.create(%{plan_name: "Basic"})
     {:ok, sub} = Subscription.activate(sub)
-    IO.inspect(sub.state, label: "State before suspend")
+    assert sub.state == :active
 
     # Try calling with the reason as a map
     {:ok, sub} = Subscription.suspend(sub, %{suspended_reason: "Test"})
-    IO.inspect(sub.state, label: "State after suspend")
-    IO.inspect(sub.suspended_reason, label: "Suspended reason")
+    assert sub.state == :suspended
+    assert sub.suspended_reason == "Test"
   end
 
   test "test ecommerce ship with map" do
@@ -19,7 +19,7 @@ defmodule ScratchTest do
     {:ok, order} = EcommerceOrder.confirm(order)
 
     {:ok, order} = EcommerceOrder.ship(order, %{tracking_number: "TRACK123"})
-    IO.inspect(order.state, label: "State after ship")
-    IO.inspect(order.tracking_number, label: "Tracking number")
+    assert order.state == :shipped
+    assert order.tracking_number == "TRACK123"
   end
 end

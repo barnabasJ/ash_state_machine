@@ -43,7 +43,7 @@ defmodule AshStateMachine.ParallelCoordinator do
   @type completion_context :: %{
           parallel_region: AshStateMachine.ParallelRegion.t(),
           exit_state: atom(),
-          region_states: %{atom() => atom()}
+          region_states: %{atom() => atom() | nil | [map()]}
         }
 
   @type completion_result ::
@@ -161,9 +161,10 @@ defmodule AshStateMachine.ParallelCoordinator do
       parallel_region ->
         regions = parallel_region.regions || []
 
-        Enum.map(regions, fn region ->
-          record = load_region(parent, region, domain)
-          {region.name, record}
+        Enum.flat_map(regions, fn region ->
+          region
+          |> load_region_records(parent, domain)
+          |> Enum.map(&{region.name, &1})
         end)
     end
   end
@@ -185,16 +186,24 @@ defmodule AshStateMachine.ParallelCoordinator do
   # Private functions
 
   defp fetch_region_states(parent, regions, domain) do
-    Enum.map(regions, fn region ->
-      record = load_region(parent, region, domain)
-      {region, record}
+    Enum.flat_map(regions, fn region ->
+      region
+      |> load_region_records(parent, domain)
+      |> Enum.map(&{region, &1})
     end)
   end
 
-  defp load_region(parent, region, domain) do
+  defp load_region_records(region, parent, domain) do
     domain = domain || Ash.Resource.Info.domain(parent.__struct__)
-    loaded = Ash.load!(parent, [region.name], domain: domain)
-    Map.get(loaded, region.name)
+    relationship_name = region_relationship_name(region)
+    loaded = Ash.load!(parent, [relationship_name], domain: domain, lazy?: false)
+    records = Map.get(loaded, relationship_name)
+
+    if AshStateMachine.Region.dynamic?(region) do
+      List.wrap(records)
+    else
+      [records]
+    end
   end
 
   # Check group completion based on strategy
@@ -278,11 +287,16 @@ defmodule AshStateMachine.ParallelCoordinator do
   defp build_complete_result(parallel_region, region_states) do
     state_map =
       region_states
-      |> Enum.map(fn
-        {region, nil} -> {region.name, nil}
-        {region, record} -> {region.name, get_state(record)}
+      |> Enum.group_by(fn {region, _record} -> region.name end)
+      |> Map.new(fn {name, entries} ->
+        [region | _] = Enum.map(entries, &elem(&1, 0))
+
+        if AshStateMachine.Region.dynamic?(region) do
+          {name, Enum.map(entries, &region_record_summary/1)}
+        else
+          {name, entries |> List.first() |> region_state_value()}
+        end
       end)
-      |> Map.new()
 
     context = %{
       parallel_region: parallel_region,
@@ -308,72 +322,46 @@ defmodule AshStateMachine.ParallelCoordinator do
 
   # Single record/region versions
   defp terminal_success_for_region?(record, region) do
-    success_states = get_success_terminal_states(region.resource)
+    success_states = AshStateMachine.Info.state_machine_success_terminal_states(region.resource)
     state = get_state(record)
     state in success_states
   end
 
   defp terminal_failure_for_region?(record, region) do
     state = get_state(record)
-    terminal_states = get_all_terminal_states(region.resource)
-    success_states = get_success_terminal_states(region.resource)
+    terminal_states = AshStateMachine.Info.state_machine_terminal_states(region.resource)
+    success_states = AshStateMachine.Info.state_machine_success_terminal_states(region.resource)
 
     state in terminal_states and state not in success_states
   end
 
   defp terminal_state_for_region?(record, region) do
-    terminal_states = get_all_terminal_states(region.resource)
+    terminal_states = AshStateMachine.Info.state_machine_terminal_states(region.resource)
     state = get_state(record)
     state in terminal_states
   end
+
+  defp region_relationship_name(region) do
+    if AshStateMachine.Region.dynamic?(region) do
+      AshStateMachine.Region.relationship_name(region)
+    else
+      region.name
+    end
+  end
+
+  defp region_record_summary({_region, nil}), do: nil
+
+  defp region_record_summary({_region, record}) do
+    %{id: Map.get(record, :id), state: get_state(record)}
+  end
+
+  defp region_state_value({_region, nil}), do: nil
+  defp region_state_value({_region, record}), do: get_state(record)
 
   defp get_state(record) do
     state_attribute =
       AshStateMachine.Info.state_machine_state_attribute!(record.__struct__)
 
     Map.get(record, state_attribute)
-  end
-
-  defp get_success_terminal_states(resource) do
-    # Terminal states that are NOT failure states
-    terminal = get_all_terminal_states(resource)
-    failure = get_failure_terminal_states(resource)
-    terminal -- failure
-  end
-
-  defp get_failure_terminal_states(resource) do
-    AshStateMachine.Info.state_machine_failure_states!(resource)
-  end
-
-  defp get_all_terminal_states(resource) do
-    transitions = AshStateMachine.Info.state_machine_transitions(resource)
-    all_states = AshStateMachine.Info.state_machine_all_states(resource)
-
-    # States that appear in "from" but never as targets are terminal
-    # Also states that never appear in "from" but appear in "to" are terminal
-    from_states =
-      transitions
-      |> Enum.flat_map(fn t -> List.wrap(t.from) end)
-      |> Enum.reject(&(&1 == :*))
-      |> MapSet.new()
-
-    to_states =
-      transitions
-      |> Enum.flat_map(fn t -> List.wrap(t.to) end)
-      |> Enum.reject(&(&1 == :*))
-      |> MapSet.new()
-
-    # Terminal states are states that have no outgoing transitions
-    all_states
-    |> Enum.filter(fn state ->
-      not MapSet.member?(from_states, state) or
-        (MapSet.member?(to_states, state) and not has_transition_from?(transitions, state))
-    end)
-  end
-
-  defp has_transition_from?(transitions, state) do
-    Enum.any?(transitions, fn t ->
-      state in List.wrap(t.from) or t.from == :*
-    end)
   end
 end

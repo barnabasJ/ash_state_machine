@@ -70,25 +70,29 @@ defmodule AshStateMachine.Transformers.GenerateRegionActions do
   end
 
   defp generate_actions_for_region(dsl_state, region) do
-    region_name = region.name
-    region_resource = region.resource
+    if AshStateMachine.Region.dynamic?(region) do
+      {:ok, dsl_state}
+    else
+      region_name = region.name
+      region_resource = region.resource
 
-    # Get update actions from the region resource
-    region_actions = get_region_update_actions(region_resource)
+      # Get update actions from the region resource
+      region_actions = get_region_update_actions(region_resource)
 
-    Enum.reduce_while(region_actions, {:ok, dsl_state}, fn action, {:ok, acc} ->
-      wrapper_action_name = :"#{region_name}_#{action.name}"
+      Enum.reduce_while(region_actions, {:ok, dsl_state}, fn action, {:ok, acc} ->
+        wrapper_action_name = :"#{region_name}_#{action.name}"
 
-      # Skip if parent already has this action defined
-      if Ash.Resource.Info.action(acc, wrapper_action_name) do
-        {:cont, {:ok, acc}}
-      else
-        case generate_wrapper_action(acc, region_name, action.name, wrapper_action_name) do
-          {:ok, new_state} -> {:cont, {:ok, new_state}}
-          {:error, error} -> {:halt, {:error, error}}
+        # Skip if parent already has this action defined
+        if Ash.Resource.Info.action(acc, wrapper_action_name) do
+          {:cont, {:ok, acc}}
+        else
+          case generate_wrapper_action(acc, region_name, action.name, wrapper_action_name) do
+            {:ok, new_state} -> {:cont, {:ok, new_state}}
+            {:error, error} -> {:halt, {:error, error}}
+          end
         end
-      end
-    end)
+      end)
+    end
   end
 
   defp get_region_update_actions(region_resource) do
@@ -107,6 +111,7 @@ defmodule AshStateMachine.Transformers.GenerateRegionActions do
 
     # Generate the wrapper action
     Ash.Resource.Builder.add_action(dsl_state, :update, wrapper_action_name,
+      accept: [],
       changes: [change],
       require_atomic?: false
     )

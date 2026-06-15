@@ -55,7 +55,7 @@ defmodule AshStateMachine.BuiltinChanges.ActivateParallelRegions do
 
     results =
       Enum.map(regions, fn region ->
-        create_region_resource(region, parent_id, context)
+        activate_region(parent, region, parent_id, context)
       end)
 
     errors = Enum.filter(results, &match?({:error, _}, &1))
@@ -67,6 +67,29 @@ defmodule AshStateMachine.BuiltinChanges.ActivateParallelRegions do
       [{:error, first_error} | _] ->
         {:error, first_error}
     end
+  end
+
+  defp activate_region(parent, region, parent_id, context) do
+    if AshStateMachine.Region.dynamic?(region) do
+      load_dynamic_region(parent, region, context)
+    else
+      create_region_resource(region, parent_id, context)
+    end
+  end
+
+  defp load_dynamic_region(parent, region, context) do
+    domain = Ash.Resource.Info.domain(parent.__struct__)
+    relationship_name = AshStateMachine.Region.relationship_name(region)
+
+    parent
+    |> Ash.load!([relationship_name],
+      domain: domain,
+      lazy?: false,
+      tenant: context.tenant,
+      actor: context.actor
+    )
+
+    {:ok, parent}
   end
 
   defp create_region_resource(region, parent_id, context) do

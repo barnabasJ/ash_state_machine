@@ -155,8 +155,7 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
       end
 
     action_opts =
-      [changes: all_changes]
-      |> maybe_add_accept(merged_config.accept)
+      [accept: merged_config.accept, changes: all_changes]
       |> maybe_add_require_atomic(require_atomic)
 
     Ash.Resource.Builder.add_action(dsl_state, :update, action_name, action_opts)
@@ -201,9 +200,6 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
   # Merge require_atomic? values - first explicit value wins
   defp merge_require_atomic(nil, value), do: value
   defp merge_require_atomic(value, _), do: value
-
-  defp maybe_add_accept(opts, []), do: opts
-  defp maybe_add_accept(opts, accept), do: Keyword.put(opts, :accept, accept)
 
   defp maybe_add_require_atomic(opts, nil), do: opts
   defp maybe_add_require_atomic(opts, value), do: Keyword.put(opts, :require_atomic?, value)

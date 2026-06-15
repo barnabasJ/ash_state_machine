@@ -264,7 +264,7 @@ defmodule AshStateMachine do
   @region %Spark.Dsl.Entity{
     name: :region,
     target: AshStateMachine.Region,
-    args: [:name, :resource],
+    args: [:name, {:optional, :resource}],
     identifier: {:auto, :unique_integer},
     schema: [
       name: [
@@ -274,9 +274,20 @@ defmodule AshStateMachine do
       ],
       resource: [
         type: :atom,
-        required: true,
+        required: false,
         doc:
-          "The Ash resource module implementing the region's state machine. Must use AshStateMachine."
+          "The Ash resource module implementing a static singleton region state machine. Must use AshStateMachine."
+      ],
+      relationship: [
+        type: :atom,
+        required: false,
+        doc:
+          "A parent has_many relationship whose related rows are the dynamic region instances. Defaults to the region name when no resource is supplied."
+      ],
+      needs: [
+        type: :atom,
+        required: false,
+        doc: "Optional relationship on dynamic region rows that lists prerequisite rows."
       ]
     ]
   }
@@ -610,7 +621,7 @@ defmodule AshStateMachine do
       end
   """
   @spec check_parallel_completion(Ash.Resource.record(), Ash.Domain.t() | nil) ::
-          {:ok, :complete | :pending} | {:error, atom()}
+          AshStateMachine.ParallelCoordinator.completion_result()
   defdelegate check_parallel_completion(parent, domain \\ nil),
     to: AshStateMachine.ParallelCoordinator,
     as: :check_completion

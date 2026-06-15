@@ -85,8 +85,8 @@ defmodule AshStateMachine.Verifiers.VerifyParallelRegions do
     end)
   end
 
-  defp verify_region(_dsl_state, region, enter_state, module) do
-    resource = region.resource
+  defp verify_region(dsl_state, region, enter_state, module) do
+    resource = resolve_region_resource!(dsl_state, region, enter_state, module)
 
     # Check if the resource module is loaded and is an Ash resource
     unless Code.ensure_loaded?(resource) do
@@ -132,6 +132,44 @@ defmodule AshStateMachine.Verifiers.VerifyParallelRegions do
             end
         """
     end
+  end
+
+  defp resolve_region_resource!(dsl_state, region, enter_state, module) do
+    if AshStateMachine.Region.dynamic?(region) do
+      relationship_name = AshStateMachine.Region.relationship_name(region)
+
+      case Ash.Resource.Info.relationship(dsl_state, relationship_name) do
+        %{type: :has_many, destination: destination} ->
+          destination
+
+        %{type: type} ->
+          raise Spark.Error.DslError,
+            module: module,
+            path: region_path(enter_state, region),
+            message:
+              "Dynamic region `:#{region.name}` must reference a has_many relationship, got `#{inspect(type)}`."
+
+        nil ->
+          raise Spark.Error.DslError,
+            module: module,
+            path: region_path(enter_state, region),
+            message:
+              "Dynamic region `:#{region.name}` references missing relationship `:#{relationship_name}`."
+      end
+    else
+      region.resource
+    end
+  end
+
+  defp region_path(enter_state, region) do
+    [
+      :state_machine,
+      :parallel_regions,
+      :parallel_region,
+      enter_state,
+      :region,
+      region.name
+    ]
   end
 
   defp uses_ash_state_machine?(resource) do

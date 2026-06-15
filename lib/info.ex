@@ -25,7 +25,33 @@ defmodule AshStateMachine.Info do
   @spec state_machine_parallel_regions(Ash.Resource.t() | map()) ::
           list(AshStateMachine.ParallelRegion.t())
   def state_machine_parallel_regions(resource_or_dsl) do
-    Spark.Dsl.Extension.get_entities(resource_or_dsl, [:state_machine, :parallel_regions])
+    resource_or_dsl
+    |> Spark.Dsl.Extension.get_entities([:state_machine, :parallel_regions])
+    |> Enum.map(&normalize_parallel_region(resource_or_dsl, &1))
+  end
+
+  @doc """
+  Returns all terminal states for the state machine.
+
+  A terminal state is a declared state with no outgoing transition. Transitions
+  whose `from` is `:*` are treated as outgoing from every state.
+  """
+  @spec state_machine_terminal_states(Ash.Resource.t() | map()) :: list(atom())
+  def state_machine_terminal_states(resource_or_dsl) do
+    transitions = state_machine_transitions(resource_or_dsl)
+
+    resource_or_dsl
+    |> state_machine_all_states()
+    |> Enum.reject(&has_transition_from?(transitions, &1))
+  end
+
+  @doc """
+  Returns terminal states that are not configured as failure states.
+  """
+  @spec state_machine_success_terminal_states(Ash.Resource.t() | map()) :: list(atom())
+  def state_machine_success_terminal_states(resource_or_dsl) do
+    state_machine_terminal_states(resource_or_dsl) --
+      state_machine_failure_states!(resource_or_dsl)
   end
 
   @doc """
@@ -142,6 +168,37 @@ defmodule AshStateMachine.Info do
         state.on_enter_validate != [] or
         state.on_exit != [] or
         state.on_exit_validate != []
+    end)
+  end
+
+  defp normalize_parallel_region(resource_or_dsl, parallel_region) do
+    regions =
+      parallel_region.regions
+      |> List.wrap()
+      |> Enum.map(&normalize_region(resource_or_dsl, &1))
+
+    %{parallel_region | regions: regions}
+  end
+
+  defp normalize_region(resource_or_dsl, region) do
+    relationship_name = region.relationship || if(is_nil(region.resource), do: region.name)
+
+    case relationship_name do
+      nil ->
+        region
+
+      relationship_name ->
+        relationship = Ash.Resource.Info.relationship(resource_or_dsl, relationship_name)
+        resource = region.resource || if(relationship, do: relationship.destination)
+
+        %{region | relationship: relationship_name, resource: resource}
+    end
+  end
+
+  defp has_transition_from?(transitions, state) do
+    Enum.any?(transitions, fn transition ->
+      from_states = List.wrap(transition.from)
+      :* in from_states or state in from_states
     end)
   end
 end

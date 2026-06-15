@@ -6,57 +6,40 @@ defmodule AshStateMachine.RegionWrapperActionsTest do
   use ExUnit.Case
 
   describe "GenerateRegionActions transformer" do
-    test "generates wrapper actions for each region's update actions" do
-      # Check that ParallelOrder has generated wrapper actions
+    @tag story: "US-GTA-02"
+    test "generated no-input wrapper actions expose metadata and delegate changes" do
       actions = Ash.Resource.Info.actions(ParallelOrder)
       action_names = Enum.map(actions, & &1.name)
 
-      # Payment region actions (process, complete, fail)
-      assert :payment_process in action_names
-      assert :payment_complete in action_names
-      assert :payment_fail in action_names
+      expected = %{
+        payment_process: {:payment, :process},
+        payment_complete: {:payment, :complete},
+        payment_fail: {:payment, :fail},
+        inventory_reserve: {:inventory, :reserve},
+        inventory_confirm: {:inventory, :confirm},
+        inventory_mark_unavailable: {:inventory, :mark_unavailable}
+      }
 
-      # Inventory region actions (reserve, confirm, mark_unavailable)
-      assert :inventory_reserve in action_names
-      assert :inventory_confirm in action_names
-      assert :inventory_mark_unavailable in action_names
-    end
-
-    test "generated wrapper actions are update type" do
-      actions = Ash.Resource.Info.actions(ParallelOrder)
-
-      for action_name <- [
-            :payment_process,
-            :payment_complete,
-            :payment_fail,
-            :inventory_reserve,
-            :inventory_confirm,
-            :inventory_mark_unavailable
-          ] do
+      for {action_name, {region, region_action}} <- expected do
+        assert action_name in action_names
         action = Enum.find(actions, &(&1.name == action_name))
-        assert action != nil, "Action #{action_name} should exist"
         assert action.type == :update, "Action #{action_name} should be an update action"
+        assert action.accept == []
+
+        delegate_change =
+          Enum.find(action.changes, fn change ->
+            case change.change do
+              {AshStateMachine.BuiltinChanges.DelegateToRegion, _opts} -> true
+              _ -> false
+            end
+          end)
+
+        assert delegate_change != nil, "Expected DelegateToRegion change for #{action_name}"
+
+        {_module, opts} = delegate_change.change
+        assert opts[:region] == region
+        assert opts[:action] == region_action
       end
-    end
-
-    test "wrapper actions have DelegateToRegion change" do
-      action = Ash.Resource.Info.action(ParallelOrder, :payment_process)
-      assert action != nil
-
-      # Find the DelegateToRegion change
-      delegate_change =
-        Enum.find(action.changes, fn change ->
-          case change.change do
-            {AshStateMachine.BuiltinChanges.DelegateToRegion, _opts} -> true
-            _ -> false
-          end
-        end)
-
-      assert delegate_change != nil, "Expected DelegateToRegion change"
-
-      {_module, opts} = delegate_change.change
-      assert opts[:region] == :payment
-      assert opts[:action] == :process
     end
 
     test "does not overwrite manually defined actions" do
