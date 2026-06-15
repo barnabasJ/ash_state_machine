@@ -1,0 +1,26 @@
+# Package-scoped documentation link checking for ash_state_machine — the
+# per-package adoption of the repo's documentation-conformance pattern (see the
+# root lychee.toml and documentation/rfc/documentation-conformance.md).
+#
+# Scope is an ALLOWLIST of input globs passed on the command line / in CI:
+#   documentation/user/**/*.md  documentation/rfc/**/*.md
+# The upstream-vendored docs (documentation/topics, /tutorials, /dsls) are NOT
+# in the allowlist — they're inherited from the fork's upstream, not ours to
+# gate.
+
+# A 200, or a redirect chain resolving to 200, is fine.
+accept = ["200"]
+
+# External checks flake — retry and cache to bound it.
+max_retries = 3
+retry_wait_time = 2
+timeout = 20
+cache = true
+max_cache_age = "1d"
+
+# Safety: never let a doc link make CI fetch an internal / cloud-metadata host.
+exclude_all_private = true
+exclude_loopback = true
+
+# Don't verify mailto: links.
+include_mail = false

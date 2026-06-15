@@ -141,6 +141,10 @@ defmodule AshStateMachine.MixProject do
   defp deps do
     [
       {:ash, ash_version("~> 3.0 and >= 3.4.66")},
+      # Documentation conformance — story<->test traceability gate (shared
+      # engine, sibling path dep; resolves in the parent checkout). See
+      # documentation/user/qa-engineer/doc-conformance/.
+      {:story_traceability, path: "../story_traceability", only: :test},
       {:igniter, "~> 0.5", only: [:dev, :test]},
       {:simple_sat, "~> 0.1", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.36", only: [:dev, :test]},
