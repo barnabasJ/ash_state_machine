@@ -63,9 +63,9 @@ defmodule AshStateMachine.BuiltinChanges.RunEntryExitChanges do
     |> run_changes(exit_changes, context)
   end
 
-  # Run entry callbacks on the changeset (before save)
-  defp schedule_entry_callbacks(changeset, nil, _resource, _context), do: changeset
-
+  # Run entry callbacks on the changeset (before save).
+  # `new_state` is guaranteed non-nil by the `not is_nil(new_state)` guard at
+  # the only call site in `change/3`, so no nil clause is needed.
   defp schedule_entry_callbacks(changeset, new_state, resource, context) do
     entry_changes = AshStateMachine.Info.state_entry_changes(resource, new_state)
     entry_validations = AshStateMachine.Info.state_entry_validations(resource, new_state)

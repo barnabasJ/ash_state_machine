@@ -33,8 +33,6 @@ defmodule AshStateMachine.ParallelCoordinator do
   - `:region_states` - Map of region name to current state
   """
 
-  require Ash.Query
-
   @type strategy ::
           :all
           | :any
