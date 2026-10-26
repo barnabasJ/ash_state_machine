@@ -56,7 +56,8 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
   end
 
   defp maybe_generate_create_action(dsl_state) do
-    existing_create = Ash.Resource.Info.action(dsl_state, :create)
+    existing_create =
+      Enum.find(Ash.Resource.Info.actions(dsl_state), &(&1.type == :create))
 
     case AshStateMachine.Info.state_machine_default_initial_state(dsl_state) do
       # No default initial state configured

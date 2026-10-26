@@ -19,6 +19,7 @@ flowchart LR
 | --------- | ------------------------------------------------------------ | --------------------------------------------------- |
 | US-GTA-01 | Transition-generated actions expose empty input metadata     | [US-GTA-01](./US-GTA-01-empty-transition-inputs.md) |
 | US-GTA-02 | Region wrapper actions expose empty input metadata           | [US-GTA-02](./US-GTA-02-empty-wrapper-inputs.md)    |
+| US-NPC-01 | Preserve an authored primary create action | [US-NPC-01](./US-NPC-01-named-create.md) |
 
 ## See also
 
