@@ -79,7 +79,21 @@ defmodule AshStateMachine.Transformers.InjectStateTransitions do
   defp generate_create_action(dsl_state, _initial_state) do
     # Create actions don't support require_atomic?, so we just generate a simple create action
     # The RunEntryExitChanges will handle entry callbacks automatically
-    Ash.Resource.Builder.add_action(dsl_state, :create, :create, primary?: true)
+    #
+    # Ash >= 3.37 enforces exactly one `primary?: true` action per type. When
+    # the resource defines its own create action (any name), the generated
+    # generic `:create` must not claim primary so the resource's own create
+    # stays the single primary.
+    other_create? =
+      dsl_state
+      |> Ash.Resource.Info.actions()
+      |> Enum.any?(&(&1.type == :create))
+
+    if other_create? do
+      Ash.Resource.Builder.add_action(dsl_state, :create, :create)
+    else
+      Ash.Resource.Builder.add_action(dsl_state, :create, :create, primary?: true)
+    end
   end
 
   defp process_action(dsl_state, action_name, transitions) do
